@@ -1,0 +1,51 @@
+{
+  "name": "grapesjs-sidebar-tools",
+  "version": "1.0.0",
+  "description": "GrapesJS plugin: split Layers sidebar with Style Manager / Component Settings tabs, a resizable divider and remembered UI state.",
+  "type": "module",
+  "main": "./dist/grapesjs-sidebar-tools.umd.cjs",
+  "module": "./dist/grapesjs-sidebar-tools.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/grapesjs-sidebar-tools.js",
+      "require": "./dist/grapesjs-sidebar-tools.umd.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "peerDependencies": {
+    "grapesjs": ">=0.19.0 <1.0.0"
+  },
+  "devDependencies": {
+    "grapesjs": "0.21.13",
+    "jsdom": "^25.0.1",
+    "typescript": "5.6.3",
+    "vite": "5.4.11",
+    "vitest": "^2.1.9"
+  },
+  "keywords": [
+    "grapesjs",
+    "grapesjs-plugin",
+    "layers",
+    "layer-manager",
+    "style-manager",
+    "trait-manager",
+    "sidebar"
+  ],
+  "author": "Alexander Shibisty",
+  "license": "MIT"
+}

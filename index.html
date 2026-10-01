@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grapesjs-sidebar-tools dev</title>
+    <link rel="stylesheet" href="/node_modules/grapesjs/dist/css/grapes.min.css" />
+    <style>html, body { margin: 0; height: 100%; }</style>
+  </head>
+  <body>
+    <div id="gjs"></div>
+    <script type="module">
+      import grapesjs from 'grapesjs';
+      import sidebarTools from './src/index.ts';
+
+      window.editor = grapesjs.init({
+        container: '#gjs',
+        height: '100vh',
+        storageManager: false,
+        components: '<h1>Title</h1><p>Some text</p><div><span>Nested</span></div>',
+        plugins: [sidebarTools],
+      });
+    </script>
+  </body>
+</html>
