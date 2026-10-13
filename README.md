@@ -1,5 +1,7 @@
 # grapesjs-sidebar-tools
 
+[![Patreon](https://c5.patreon.com/external/logo/become_a_patron_button.png)](https://www.patreon.com/cw/shibisty)
+
 GrapesJS plugin that turns the **Layers** panel into a split sidebar:
 
 - **top** — the layer tree (unchanged)
@@ -124,3 +126,7 @@ npm run build      # dist/: ES module, UMD, .d.ts
 ## License
 
 MIT
+
+[![Patreon](https://c5.patreon.com/external/logo/become_a_patron_button.png)](https://www.patreon.com/cw/shibisty)
+
+If this project helps you, consider supporting its development on Patreon ❤️
