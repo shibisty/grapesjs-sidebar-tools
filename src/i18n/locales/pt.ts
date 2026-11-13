@@ -1,9 +1,9 @@
 import type { SidebarToolsMessages } from '../types';
 
 const messages: SidebarToolsMessages = {
-  styleManagerTab: 'Gerenciador de estilos',
-  settingsTab: 'Configurações do componente',
   resizerTitle: 'Arraste para redimensionar (clique duplo para voltar a 50/50)',
+  zoneResizerTitle: 'Arraste para redimensionar o painel (clique duplo para redefinir)',
+  dropHere: 'Solte aqui',
 };
 
 export default messages;

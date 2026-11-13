@@ -1,24 +1,23 @@
 /**
  * grapesjs-sidebar-tools
  * ----------------------
- * GrapesJS plugin: turns the Layers panel into a split sidebar.
+ * GrapesJS plugin: dockable tool panels.
  *
- *   - top    -> the layer tree (unchanged)
- *   - bottom -> tabs "Style Manager" / "Component Settings", shown only
- *               while the Layers tab is open AND a component is selected
- *   - a drag handle between the two halves (double-click = 50/50)
+ * Every button of the views panel (Style Manager, Settings, Layers,
+ * Blocks, and the views other plugins add there) becomes a tab that can
+ * be dragged into one of three zones around the canvas — left, right and
+ * bottom. The left and right zones can be split in two by height (drop a
+ * tab on the top or bottom third of a group), zones are resized by their
+ * inner edge, and the whole layout is remembered in localStorage.
  *
- * The real Style Manager / Trait Manager DOM is MOVED into the bottom half
- * while the Layers tab is open and moved back when you leave it (never
- * re-rendered), so their own top tabs keep working.
+ * The real GrapesJS views are moved into the tabs, not re-created, and
+ * their commands keep running, so several of them can be visible at once.
  *
- * Remembered in localStorage (`storageKey`): open Style Manager sectors,
- * the active bottom tab, the height split and the active GLOBAL tab
- * (top panel: styles / settings / layers / blocks).
- *
- * Commands (used by the `grapesjs-layers-context-menu` plugin):
- *   layers-sidebar:show-styles    -> bottom half on the Style Manager tab
- *   layers-sidebar:show-settings  -> bottom half on the Component Settings tab
+ * Commands:
+ *   sidebar-tools:show { id }      -> show a tab (id = command of its button)
+ *   sidebar-tools:reset-layout     -> back to the default layout
+ *   layers-sidebar:show-styles     -> show the Style Manager tab (grapesjs-context-menu)
+ *   layers-sidebar:show-settings   -> show the Settings tab
  *
  * Usage:
  *   import grapesjsSidebarTools from 'grapesjs-sidebar-tools';
@@ -28,11 +27,14 @@
 import plugin from './plugin';
 
 export type {
-  BottomTab,
-  ElementTarget,
+  DefaultLayout,
+  DockLayout,
+  GroupState,
   SidebarState,
   SidebarToolsLabels,
   SidebarToolsOptions,
+  ZoneId,
+  ZoneState,
 } from './types';
 export type { SidebarToolsMessages } from './i18n/types';
 

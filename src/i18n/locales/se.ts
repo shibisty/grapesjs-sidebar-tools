@@ -6,9 +6,9 @@ import type { SidebarToolsMessages } from '../types';
  * so the plugin uses the same code to match `i18n.locale: 'se'`.
  */
 const messages: SidebarToolsMessages = {
-  styleManagerTab: 'Stilhanterare',
-  settingsTab: 'Komponentinställningar',
   resizerTitle: 'Dra för att ändra storlek (dubbelklicka för att återställa till 50/50)',
+  zoneResizerTitle: 'Dra för att ändra panelens storlek (dubbelklicka för att återställa)',
+  dropHere: 'Släpp här',
 };
 
 export default messages;

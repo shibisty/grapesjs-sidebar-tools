@@ -1,7 +1,7 @@
 {
   "name": "grapesjs-sidebar-tools",
-  "version": "1.0.1",
-  "description": "GrapesJS plugin: split Layers sidebar with Style Manager / Component Settings tabs, a resizable divider and remembered UI state.",
+  "version": "2.0.0",
+  "description": "GrapesJS plugin: dockable tool panels — drag Styles, Settings, Layers, Blocks (and other plugins' views) into left, right and bottom zones around the canvas; side zones split in two; sizes and layout remembered.",
   "type": "module",
   "main": "./dist/grapesjs-sidebar-tools.umd.cjs",
   "module": "./dist/grapesjs-sidebar-tools.js",
@@ -41,8 +41,12 @@
   "keywords": [
     "grapesjs",
     "grapesjs-plugin",
+    "dock",
+    "docking",
+    "panels",
+    "tabs",
+    "layout",
     "layers",
-    "layer-manager",
     "style-manager",
     "trait-manager",
     "sidebar"

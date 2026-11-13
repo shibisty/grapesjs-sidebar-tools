@@ -53,24 +53,12 @@ describe('locale catalogs', () => {
   it('non-English locales are actually translated (not copies of en.ts)', () => {
     for (const [code, messages] of Object.entries(LOCALE_MESSAGES)) {
       if (code === 'en') continue;
-      // tab names may legitimately stay "Style Manager" (de/it/ko do so in GrapesJS core too),
-      // but the sentence-long tooltip must always be translated
       expect(messages.resizerTitle, code).not.toBe(en.resizerTitle);
+      expect(messages.zoneResizerTitle, code).not.toBe(en.zoneResizerTitle);
+      expect(messages.dropHere, code).not.toBe(en.dropHere);
     }
   });
 
-  it('the settings tab uses the same wording as GrapesJS core traitManager.label', async () => {
-    for (const code of GRAPESJS_LOCALES) {
-      const mod: any = await import(`../../node_modules/grapesjs/locale/${code}.js`);
-      // the core locales are CommonJS builds: module.default.default
-      const core = mod.default?.default ?? mod.default;
-      // fa.js in GrapesJS core nests traitManager inside styleManager
-      const label = core.traitManager?.label ?? core.styleManager?.traitManager?.label;
-      expect(typeof label, `${code}: core traitManager.label`).toBe('string');
-      if (code === 'en') continue; // ours is Title Case: "Component Settings"
-      expect(LOCALE_MESSAGES[code].settingsTab, code).toBe(label);
-    }
-  });
 });
 
 describe('registerI18n', () => {
@@ -80,15 +68,15 @@ describe('registerI18n', () => {
     expect(addMessages).toHaveBeenCalledTimes(1);
     const [payload] = addMessages.mock.calls[0] as [Record<string, { sidebarTools: SidebarToolsMessages }>];
     expect(Object.keys(payload).sort()).toEqual([...SUPPORTED_LOCALES].sort());
-    expect(payload.en.sidebarTools.settingsTab).toBe('Component Settings');
-    expect(payload.ru.sidebarTools.settingsTab).toBe('Настройки компонента');
+    expect(payload.en.sidebarTools.dropHere).toBe('Drop here');
+    expect(payload.ru.sidebarTools.dropHere).toBe('Перетащите сюда');
   });
 
   it('passes copies, so a site editing the messages cannot change the built-in catalog', () => {
     const addMessages = vi.fn();
     registerI18n({ I18n: { addMessages } } as any);
-    addMessages.mock.calls[0][0].en.sidebarTools.settingsTab = 'changed';
-    expect(LOCALE_MESSAGES.en.settingsTab).toBe('Component Settings');
+    addMessages.mock.calls[0][0].en.sidebarTools.dropHere = 'changed';
+    expect(LOCALE_MESSAGES.en.dropHere).toBe('Drop here');
   });
 
   it('does nothing on an editor without the I18n module', () => {

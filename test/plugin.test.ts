@@ -1,291 +1,228 @@
-import { describe, expect, it, vi } from 'vitest';
-import plugin from '../src/index';
-import type { SidebarToolsOptions } from '../src/types';
-import { createFakeEditor, FakeModel, FakeSector, flush, type FakeEditorOptions } from './helpers/fakeEditor';
+import type { Editor } from 'grapesjs';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { clickTab, createEditor, destroyEditor, flush, pane, root, tab, tabsOf } from './helpers/editor';
 
-const KEY = 'gjs-lsb-state';
+let editor: Editor | undefined;
+afterEach(async () => {
+  await destroyEditor(editor);
+  editor = undefined;
+});
 
-/**
- * Page similar to a custom GrapesJS layout: separate containers for
- * layers / styles / traits, each manager already rendered inside.
- */
-function buildPage() {
-  const layers = document.createElement('div');
-  layers.id = 'layers';
-  const tree = document.createElement('div');
-  tree.className = 'gjs-layer-manager';
-  layers.appendChild(tree);
+const CORE = ['open-sm', 'open-tm', 'open-layers', 'open-blocks'];
+const viewsContainer = (ed: Editor) => root(ed).querySelector<HTMLElement>('.gjs-pn-views-container')!;
+const stored = () => JSON.parse(localStorage.getItem('gjs-sidebar-tools') || 'null');
 
-  const styles = document.createElement('div');
-  styles.id = 'styles';
-  const sm = document.createElement('div');
-  sm.className = 'gjs-sm-sectors';
-  styles.appendChild(sm);
-
-  const traits = document.createElement('div');
-  traits.id = 'traits';
-  const tm = document.createElement('div');
-  tm.className = 'gjs-trt-traits';
-  traits.appendChild(tm);
-
-  document.body.append(layers, styles, traits);
-  return { layers, tree, styles, sm, traits, tm };
-}
-
-async function setup(pluginOpts: SidebarToolsOptions = {}, editorOpts: FakeEditorOptions = {}) {
-  const page = buildPage();
-  const fake = createFakeEditor({
-    layersAppendTo: '#layers',
-    smAppendTo: '#styles',
-    tmAppendTo: '#traits',
-    ...editorOpts,
-  });
-  plugin(fake.editor, pluginOpts);
-  fake.emit('load');
-  await flush();
-  return { ...page, ...fake };
-}
-
-const splitOf = (layers: HTMLElement) => layers.querySelector<HTMLElement>('.gjs-lsb-split')!;
-
-describe('plugin', () => {
-  it('registers the public commands', () => {
-    const fake = createFakeEditor();
-    plugin(fake.editor, {});
-    expect(fake.commands.has('layers-sidebar:show-styles')).toBe(true);
-    expect(fake.commands.has('layers-sidebar:show-settings')).toBe(true);
+describe('docking the default GrapesJS views', () => {
+  it('turns every views panel button into a tab of the right zone', async () => {
+    editor = await createEditor();
+    const tabs = tabsOf(editor);
+    expect(tabs.left).toEqual([]);
+    expect(tabs.bottom).toEqual([]);
+    expect(tabs.right).toHaveLength(1);
+    expect(tabs.right[0].map((t) => t.replace('*', ''))).toEqual(CORE);
+    expect(tabs.right[0].filter((t) => t.endsWith('*'))).toHaveLength(1);
+    expect(root(editor).classList.contains('gjs-st-docked')).toBe(true);
   });
 
-  it('injects the CSS unless disabled', () => {
-    plugin(createFakeEditor().editor, { injectCss: false });
-    expect(document.getElementById('gjs-lsb-styles')).toBeNull();
-    plugin(createFakeEditor().editor);
-    expect(document.getElementById('gjs-lsb-styles')).not.toBeNull();
+  it('moves the real manager DOM into the panes and empties the views container', async () => {
+    editor = await createEditor();
+    expect(pane(editor, 'open-sm').querySelector('.gjs-sm-sectors')).not.toBeNull();
+    expect(pane(editor, 'open-tm').querySelector('.gjs-traits-cs, .gjs-trt-traits')).not.toBeNull();
+    expect(pane(editor, 'open-layers').querySelector('.gjs-layer-item, .gjs-layers, [data-toggle-select]')).not.toBeNull();
+    expect(pane(editor, 'open-blocks').querySelector('.gjs-blocks-cs, .gjs-blocks-c')).not.toBeNull();
+    expect(viewsContainer(editor).children).toHaveLength(0);
   });
 
-  it('builds the split on load, closed while nothing is selected', async () => {
-    const { layers, tree, sm, styles } = await setup();
-    const split = splitOf(layers);
-    expect(split).not.toBeNull();
-    expect(split.querySelector('.gjs-lsb-top')!.firstChild).toBe(tree);
-    expect(split.classList.contains('gjs-lsb-split--open')).toBe(false);
-    expect(sm.parentNode).toBe(styles);
+  it('gives every view button a context of its own and leaves them idle', async () => {
+    editor = await createEditor();
+    const buttons = (editor.Panels.getPanel('views') as any).get('buttons').models;
+    const contexts = buttons.map((b: any) => b.get('context'));
+    expect(new Set(contexts).size).toBe(buttons.length);
+    expect(buttons.every((b: any) => !b.get('active'))).toBe(true);
   });
 
-  it('moves the managers in on selection and back on deselection', async () => {
-    const { layers, sm, tm, styles, traits, select } = await setup();
-    select({ id: 'cmp' });
+  it('keeps several views visible at once and their content alive', async () => {
+    editor = await createEditor({ defaultLayout: { left: [['open-layers']], bottom: [['open-tm']] } });
+    expect(tabsOf(editor)).toEqual({ left: [['open-layers*']], right: [expect.any(Array)], bottom: [['open-tm*']] });
+    editor.select(editor.getWrapper()!.find('#title')[0]);
+    await flush(20);
+    ['open-layers', 'open-tm'].forEach((id) => expect(pane(editor!, id).hidden).toBe(false));
+    // the Trait Manager shows the traits of the selection, not its "select a component" header
+    const traits = pane(editor, 'open-tm').querySelector<HTMLElement>('.gjs-traits-cs, .gjs-trt-traits')!;
+    expect(traits.closest('[style*="display: none"]')).toBeNull();
+  });
+
+  it('a click on a tab shows it and is remembered', async () => {
+    editor = await createEditor();
+    clickTab(editor, 'open-layers');
+    expect(tab(editor, 'open-layers').classList.contains('gjs-st-tab--active')).toBe(true);
+    expect(pane(editor, 'open-layers').hidden).toBe(false);
+    expect(pane(editor, 'open-sm').hidden).toBe(true);
+    expect(stored().layout.right.groups[0].active).toBe('open-layers');
+  });
+
+  it('restores a stored layout', async () => {
+    localStorage.setItem(
+      'gjs-sidebar-tools',
+      JSON.stringify({
+        layout: {
+          left: { size: 300, ratio: 0.4, groups: [{ tabs: ['open-layers'], active: 'open-layers' }, { tabs: ['open-blocks'], active: 'open-blocks' }] },
+          right: { size: null, ratio: 0.5, groups: [{ tabs: ['open-sm', 'open-tm'], active: 'open-tm' }] },
+          bottom: { size: null, ratio: 0.5, groups: [] },
+        },
+      }),
+    );
+    editor = await createEditor();
+    expect(tabsOf(editor)).toEqual({
+      left: [['open-layers*'], ['open-blocks*']],
+      right: [['open-sm', 'open-tm*']],
+      bottom: [],
+    });
+    expect(root(editor).style.getPropertyValue('--gjs-st-left')).toBe('300px');
+    expect(root(editor).querySelector('.gjs-st-zone--left')!.classList.contains('gjs-st-zone--split')).toBe(true);
+    expect(root(editor).querySelector('.gjs-st-zone--bottom')!.classList.contains('gjs-st-zone--empty')).toBe(true);
+    expect(root(editor).style.getPropertyValue('--gjs-st-bottom')).toBe('0px');
+  });
+
+  it('views option limits the docked views', async () => {
+    editor = await createEditor({ views: ['open-sm', 'open-layers'] });
+    expect(tabsOf(editor).right[0].map((t) => t.replace('*', ''))).toEqual(['open-sm', 'open-layers']);
+  });
+});
+
+describe('external runs and stops', () => {
+  it('activating a hidden view button shows its tab and resets the button', async () => {
+    editor = await createEditor();
+    const btn = editor.Panels.getButton('views', 'open-blocks')!;
+    btn.set('active', true);
+    expect(tab(editor, 'open-blocks').classList.contains('gjs-st-tab--active')).toBe(true);
     await flush();
-    const split = splitOf(layers);
-    expect(split.classList.contains('gjs-lsb-split--open')).toBe(true);
-    expect(sm.parentElement!.classList.contains('gjs-lsb-panel--style')).toBe(true);
-    expect(tm.parentElement!.classList.contains('gjs-lsb-panel--settings')).toBe(true);
+    expect(btn.get('active')).toBe(false);
+    // the content survived the stop that came with the reset
+    expect(pane(editor, 'open-blocks').firstElementChild!.getAttribute('style') || '').not.toContain('display: none');
+  });
 
-    select(null);
+  it('runCommand of a view shows its tab; stopCommand does not hide its content', async () => {
+    editor = await createEditor();
+    editor.runCommand('open-layers');
+    expect(tab(editor, 'open-layers').classList.contains('gjs-st-tab--active')).toBe(true);
     await flush();
-    expect(split.classList.contains('gjs-lsb-split--open')).toBe(false);
-    expect(sm.parentNode).toBe(styles);
-    expect(tm.parentNode).toBe(traits);
-  });
-
-  it('stays closed while the layers container is hidden', async () => {
-    const { layers, sm, styles, select, emit } = await setup();
-    select({ id: 'cmp' });
+    editor.runCommand('open-layers');
+    editor.stopCommand('open-layers', { force: true });
     await flush();
-    layers.style.display = 'none';
-    emit('run', 'open-sm');
-    await flush();
-    expect(splitOf(layers).classList.contains('gjs-lsb-split--open')).toBe(false);
-    expect(sm.parentNode).toBe(styles);
+    const content = pane(editor, 'open-layers').firstElementChild as HTMLElement;
+    expect(content.style.display).not.toBe('none');
   });
 
-  it('show-settings command switches the bottom tab and persists it', async () => {
-    const { layers, select, editor } = await setup();
-    select({ id: 'cmp' });
-    editor.Commands.run('layers-sidebar:show-settings');
-    await flush();
-    const split = splitOf(layers);
-    expect(split.querySelector<HTMLElement>('.gjs-lsb-panel--settings')!.hidden).toBe(false);
-    expect(split.querySelector<HTMLElement>('.gjs-lsb-panel--style')!.hidden).toBe(true);
-    expect(JSON.parse(localStorage.getItem(KEY)!).tab).toBe('settings');
-
-    editor.Commands.run('layers-sidebar:show-styles');
-    expect(JSON.parse(localStorage.getItem(KEY)!).tab).toBe('style');
+  it('context-menu commands and sidebar-tools:show', async () => {
+    editor = await createEditor();
+    editor.runCommand('layers-sidebar:show-settings');
+    expect(tab(editor, 'open-tm').classList.contains('gjs-st-tab--active')).toBe(true);
+    editor.runCommand('layers-sidebar:show-styles');
+    expect(tab(editor, 'open-sm').classList.contains('gjs-st-tab--active')).toBe(true);
+    editor.runCommand('sidebar-tools:show', { id: 'open-blocks' });
+    expect(tab(editor, 'open-blocks').classList.contains('gjs-st-tab--active')).toBe(true);
+    expect(() => editor!.runCommand('sidebar-tools:show', { id: 'nope' })).not.toThrow();
   });
 
-  it('restores the tab and height split from localStorage', async () => {
-    localStorage.setItem(KEY, JSON.stringify({ tab: 'settings', ratio: 0.3 }));
-    const { layers } = await setup();
-    const split = splitOf(layers);
-    expect(split.style.getPropertyValue('--lsb-top')).toBe('30%');
-    expect(split.querySelector('[data-tab="settings"]')!.classList.contains('gjs-lsb-tab--active')).toBe(true);
+  it('reset-layout puts everything back into the right zone', async () => {
+    editor = await createEditor({ defaultLayout: {} });
+    localStorage.clear();
+    editor.runCommand('sidebar-tools:show', { id: 'open-layers' });
+    editor.runCommand('sidebar-tools:reset-layout');
+    expect(tabsOf(editor).right[0].map((t) => t.replace('*', ''))).toEqual(CORE);
+    expect(stored().layout.left.groups).toEqual([]);
   });
+});
 
-  it('uses a custom storage key and label texts', async () => {
-    const { layers, select } = await setup({ storageKey: 'custom', labels: { settingsTab: 'Настройки' } });
-    select({ id: 'cmp' });
-    await flush();
-    layers.querySelector<HTMLElement>('[data-tab="settings"]')!.click();
-    expect(layers.querySelector('[data-tab="settings"]')!.textContent).toBe('Настройки');
-    expect(localStorage.getItem(KEY)).toBeNull();
-    expect(JSON.parse(localStorage.getItem('custom')!).tab).toBe('settings');
-  });
-
-  it('shows the texts in the editor locale', async () => {
-    const { layers } = await setup({}, { locale: 'ru' });
-    expect(layers.querySelector('[data-tab="style"]')!.textContent).toBe('Диспетчер стилей');
-    expect(layers.querySelector('[data-tab="settings"]')!.textContent).toBe('Настройки компонента');
-    expect(layers.querySelector<HTMLElement>('.gjs-lsb-resizer')!.title).toContain('Потяните');
-  });
-
-  it('follows locale changes at runtime, including RTL', async () => {
-    const { layers, editor } = await setup();
-    const tab = () => layers.querySelector('[data-tab="settings"]')!;
-    expect(tab().textContent).toBe('Component Settings');
-    editor.I18n.setLocale('he');
-    expect(tab().textContent).toBe('הגדרות רכיב');
-    expect(layers.querySelector('.gjs-lsb-tabs')!.getAttribute('dir')).toBe('rtl');
-    editor.I18n.setLocale('pl');
-    expect(tab().textContent).toBe('Ustawienia elementu');
-    expect(layers.querySelector('.gjs-lsb-tabs')!.getAttribute('dir')).toBe('ltr');
-  });
-
-  it('picks up strings overridden through editor.I18n.addMessages()', async () => {
-    const { layers, editor } = await setup();
-    editor.I18n.addMessages({ en: { sidebarTools: { styleManagerTab: 'Styles' } } });
-    expect(layers.querySelector('[data-tab="style"]')!.textContent).toBe('Styles');
-  });
-
-  it('the labels option wins over the translations in every locale', async () => {
-    const { layers, editor } = await setup({ labels: { settingsTab: 'Props' } }, { locale: 'ru' });
-    const tab = (name: string) => layers.querySelector(`[data-tab="${name}"]`)!.textContent;
-    expect(tab('settings')).toBe('Props');
-    expect(tab('style')).toBe('Диспетчер стилей');
-    editor.I18n.setLocale('fr');
-    expect(tab('settings')).toBe('Props');
-    expect(tab('style')).toBe('Gestionnaire de style');
-  });
-
-  it('does not write anything with persist: false', async () => {
-    const { layers, select } = await setup({ persist: false });
-    select({ id: 'cmp' });
-    await flush();
-    layers.querySelector<HTMLElement>('[data-tab="settings"]')!.click();
-    expect(localStorage.length).toBe(0);
-  });
-
-  it('remembers and re-applies Style Manager sectors', async () => {
-    localStorage.setItem(KEY, JSON.stringify({ sectors: { general: true } }));
-    const general = new FakeSector('general', false);
-    const layout = new FakeSector('layout', false);
-    await setup({}, { sectors: [general, layout] });
-    expect(general.get('open')).toBe(true);
-    layout.set('open', true);
-    expect(JSON.parse(localStorage.getItem(KEY)!).sectors).toEqual({ general: true, layout: true });
-  });
-
-  it('restores the global tab and records later switches', async () => {
-    localStorage.setItem(KEY, JSON.stringify({ globalTab: 'open-layers' }));
-    const layersBtn = new FakeModel({ command: 'open-layers', active: false });
-    const { emit } = await setup({}, { panels: [layersBtn] });
-    await flush();
-    expect(layersBtn.get('active')).toBe(true);
-    await flush(120);
-    emit('run', 'open-blocks');
-    expect(JSON.parse(localStorage.getItem(KEY)!).globalTab).toBe('open-blocks');
-  });
-
-  it('works with the default GrapesJS panels (no appendTo), once open-layers ran', async () => {
-    const sm = document.createElement('div');
-    sm.className = 'gjs-sm-sectors';
-    const smHome = document.createElement('div');
-    smHome.appendChild(sm);
-    document.body.appendChild(smHome);
-
-    const fake = createFakeEditor();
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    plugin(fake.editor, {});
-    fake.emit('load');
-    await flush();
-    expect(document.querySelector('.gjs-lsb-split')).toBeNull();
-    expect(warn).not.toHaveBeenCalled(); // not configured -> not an error
-
-    // what GrapesJS' OpenLayers command does on its first run
-    const layersWrap = document.createElement('div');
-    layersWrap.appendChild(document.createElement('div'));
-    document.body.appendChild(layersWrap);
-    fake.commands.set('open-layers', {
-      layers: layersWrap,
-      run() {
-        layersWrap.style.display = 'block';
+describe('views added by other plugins', () => {
+  /** A plugin with its own view: a button in the views panel whose command shows a box in the views container. */
+  function pagesLikePlugin(ed: Editor) {
+    let box: HTMLElement | null = null;
+    ed.Commands.add('my-view', {
+      run(editor: Editor) {
+        if (!box) {
+          box = document.createElement('div');
+          box.className = 'my-view';
+          box.textContent = 'My view';
+          (editor.Panels.getPanel('views-container') as any).set('appendContent', box).trigger('change:appendContent');
+        }
+        box.hidden = false;
+      },
+      stop() {
+        if (box) box.hidden = true;
       },
     });
-    fake.select({ id: 'cmp' });
-    fake.editor.Commands.run('open-layers');
-    await flush();
+    ed.Panels.addButton('views', { id: 'my-view-btn', command: 'my-view', className: 'fa fa-star', attributes: { title: 'Mine' } });
+  }
 
-    const split = layersWrap.querySelector('.gjs-lsb-split')!;
-    expect(split).not.toBeNull();
-    expect(split.classList.contains('gjs-lsb-split--open')).toBe(true);
-    expect(sm.parentElement!.classList.contains('gjs-lsb-panel--style')).toBe(true);
+  it('docks a third-party view like the core ones', async () => {
+    editor = await createEditor({}, [pagesLikePlugin]);
+    expect(tabsOf(editor).right[0].map((t) => t.replace('*', ''))).toEqual([...CORE, 'my-view']);
+    expect(pane(editor, 'my-view').querySelector('.my-view')).not.toBeNull();
+    expect(tab(editor, 'my-view').title).toBe('Mine');
+    expect(tab(editor, 'my-view').classList.contains('fa-star')).toBe(true);
+    // someone stops it (hides the box): it comes back
+    editor.runCommand('my-view');
+    await flush();
+    editor.stopCommand('my-view', { force: true });
+    await flush();
+    expect(pane(editor, 'my-view').querySelector<HTMLElement>('.my-view')!.hidden).toBe(false);
   });
 
-  it.each([true, false])('prerenders a Trait Manager that was never opened (prerenderManagers: %s)', async (prerender) => {
-    const layers = document.createElement('div');
-    layers.id = 'layers';
-    const home = document.createElement('div');
-    document.body.append(layers, home);
-    const fake = createFakeEditor({ layersAppendTo: '#layers' });
-    const run = vi.fn(function (this: any) {
-      this.$cn = true;
-      const tm = document.createElement('div');
-      tm.className = 'gjs-traits-cs';
-      home.appendChild(tm);
-    });
-    fake.commands.set('open-tm', { run, stop: vi.fn() });
-    plugin(fake.editor, { prerenderManagers: prerender });
-    fake.emit('load');
-    fake.select({ id: 'cmp' });
-    await flush();
-    const inSplit = !!layers.querySelector('.gjs-lsb-panel--settings .gjs-traits-cs');
-    expect(inSplit).toBe(prerender);
-    expect(run).toHaveBeenCalledTimes(prerender ? 1 : 0);
+  it('docks a view button added after the dock was built', async () => {
+    editor = await createEditor();
+    pagesLikePlugin(editor);
+    await flush(5);
+    expect(tabsOf(editor).right[0].map((t) => t.replace('*', ''))).toContain('my-view');
+    editor.Panels.removeButton('views', 'my-view-btn');
+    expect(tabsOf(editor).right[0].map((t) => t.replace('*', ''))).not.toContain('my-view');
   });
 
-  it('warns once when a configured container is missing', async () => {
+  it('leaves buttons that render nothing in the views container alone', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const fake = createFakeEditor({ layersAppendTo: '#missing' });
-    plugin(fake.editor, {});
-    fake.emit('load');
-    await flush();
-    fake.emit('component:toggled');
-    await flush();
-    expect(warn).toHaveBeenCalledTimes(1);
+    editor = await createEditor({}, [
+      (ed) => {
+        ed.Commands.add('noop-view', { run() {}, stop() {} });
+        ed.Panels.addButton('views', { id: 'noop', command: 'noop-view' });
+      },
+    ]);
+    expect(tabsOf(editor).right[0].map((t) => t.replace('*', ''))).toEqual(CORE);
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('texts and cleanup', () => {
+  it('translates the resizer tooltips and follows locale changes', async () => {
+    editor = await createEditor({ defaultLayout: { left: [['open-layers'], ['open-blocks']] } });
+    const split = () => root(editor!).querySelector<HTMLElement>('.gjs-st-zone--left .gjs-st-split')!;
+    expect(split.call(null).title).toBe('Drag to resize (double-click to reset to 50/50)');
+    editor.I18n.addMessages({ ru: {} });
+    editor.I18n.setLocale('ru');
+    expect(split().title).toBe('Потяните, чтобы изменить высоту (двойной клик — 50/50)');
+    expect(root(editor).querySelector<HTMLElement>('.gjs-st-edge--left')!.title).toContain('размер панели');
   });
 
-  it('does not build a second split in the same container', async () => {
-    const { layers, editor, emit } = await setup();
-    plugin(editor, {});
-    emit('load');
-    await flush();
-    expect(layers.querySelectorAll('.gjs-lsb-split')).toHaveLength(1);
+  it('the labels option wins', async () => {
+    editor = await createEditor({ labels: { dropHere: 'Сюда' } });
+    expect(root(editor).querySelector('.gjs-st-drop--left')!.textContent).toBe('Сюда');
   });
 
-  it('cleans up on editor destroy', async () => {
-    const { layers, tree, sm, styles, select, emit, handlerCount } = await setup();
-    select({ id: 'cmp' });
-    await flush();
-    emit('destroy');
-    expect(layers.querySelector('.gjs-lsb-split')).toBeNull();
-    expect(tree.parentNode).toBe(layers);
-    expect(sm.parentNode).toBe(styles);
-    expect(handlerCount('component:toggled')).toBe(0);
-    expect(handlerCount('run')).toBe(0);
-    expect(handlerCount('i18n:locale')).toBe(0);
-    expect(handlerCount('i18n:update')).toBe(0);
-    // late events are harmless
-    emit('component:toggled');
-    await flush();
-    expect(layers.querySelector('.gjs-lsb-split')).toBeNull();
+  it('gives everything back on destroy', async () => {
+    editor = await createEditor();
+    const ed = editor;
+    ed.trigger('destroy');
+    expect(root(ed).classList.contains('gjs-st-docked')).toBe(false);
+    expect(root(ed).querySelector('.gjs-st-zone')).toBeNull();
+    expect(viewsContainer(ed).querySelector('.gjs-sm-sectors')).not.toBeNull();
+    const buttons = (ed.Panels.getPanel('views') as any).get('buttons').models;
+    expect(buttons.every((b: any) => !String(b.get('context') || '').startsWith('gjs-st-view:'))).toBe(true);
+  });
+
+  it('remembers open Style Manager sectors', async () => {
+    editor = await createEditor();
+    const sector = (editor.StyleManager.getSectors() as any).models[0];
+    sector.set('open', !sector.get('open'));
+    expect(stored().sectors[sector.getId()]).toBe(sector.get('open'));
   });
 });

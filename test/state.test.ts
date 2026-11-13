@@ -7,27 +7,31 @@ describe('sanitizeState', () => {
   it('returns defaults for garbage', () => {
     expect(sanitizeState(null)).toEqual(defaultState());
     expect(sanitizeState('x')).toEqual(defaultState());
-    expect(sanitizeState([])).toMatchObject({ tab: 'style', ratio: 0.5 });
+    expect(sanitizeState([])).toEqual(defaultState());
   });
 
-  it('keeps valid fields and drops invalid ones', () => {
-    expect(
-      sanitizeState({ tab: 'settings', ratio: 0.3, sectors: { general: 1, layout: 0 }, globalTab: 'open-layers' }),
-    ).toEqual({ tab: 'settings', ratio: 0.3, sectors: { general: true, layout: false }, globalTab: 'open-layers' });
-    expect(sanitizeState({ tab: 'bogus', ratio: 'x', sectors: [1], globalTab: 5 })).toEqual(defaultState());
-    expect(sanitizeState({ ratio: Infinity }).ratio).toBe(0.5);
+  it('keeps an object layout (validated later) and boolean sectors', () => {
+    const layout = { right: { groups: [] } };
+    expect(sanitizeState({ layout, sectors: { general: 1, layout: 0 } })).toEqual({
+      layout,
+      sectors: { general: true, layout: false },
+    });
+    expect(sanitizeState({ layout: [1], sectors: [1] })).toEqual(defaultState());
+  });
+
+  it('ignores the 1.x state shape', () => {
+    expect(sanitizeState({ tab: 'settings', ratio: 0.3, globalTab: 'open-sm' })).toEqual(defaultState());
   });
 });
 
 describe('createStateStore', () => {
   it('loads and saves through localStorage', () => {
-    localStorage.setItem(KEY, JSON.stringify({ tab: 'settings', ratio: 0.7 }));
+    localStorage.setItem(KEY, JSON.stringify({ sectors: { a: true } }));
     const store = createStateStore({ persist: true, storageKey: KEY });
-    expect(store.state.tab).toBe('settings');
-    expect(store.state.ratio).toBe(0.7);
-    store.state.globalTab = 'open-blocks';
+    expect(store.state.sectors).toEqual({ a: true });
+    store.state.sectors.b = false;
     store.save();
-    expect(JSON.parse(localStorage.getItem(KEY)!).globalTab).toBe('open-blocks');
+    expect(JSON.parse(localStorage.getItem(KEY)!).sectors).toEqual({ a: true, b: false });
   });
 
   it('survives corrupted JSON', () => {
@@ -36,13 +40,11 @@ describe('createStateStore', () => {
   });
 
   it('does not touch localStorage with persist: false', () => {
-    localStorage.setItem(KEY, JSON.stringify({ tab: 'settings' }));
+    localStorage.setItem(KEY, JSON.stringify({ sectors: { a: true } }));
     const store = createStateStore({ persist: false, storageKey: KEY });
-    expect(store.state.tab).toBe('style');
-    store.state.tab = 'settings';
-    store.state.ratio = 0.2;
+    expect(store.state.sectors).toEqual({});
     store.save();
-    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ tab: 'settings' });
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ sectors: { a: true } });
   });
 
   it('ignores storage write errors', () => {

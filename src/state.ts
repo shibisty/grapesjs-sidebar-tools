@@ -1,4 +1,4 @@
-import type { ResolvedOptions, SidebarState } from './types';
+import type { SidebarState } from './types';
 
 export interface StateStore {
   readonly state: SidebarState;
@@ -6,40 +6,42 @@ export interface StateStore {
 }
 
 export function defaultState(): SidebarState {
-  return { tab: 'style', ratio: 0.5, sectors: {}, globalTab: null };
+  return { layout: null, sectors: {} };
 }
 
 function getStorage(): Storage | null {
   try {
     return typeof localStorage !== 'undefined' ? localStorage : null;
   } catch {
-    // Accessing localStorage throws when site data is blocked.
-    return null;
+    return null; // access throws when site data is blocked
   }
 }
 
-/** Validates whatever was found in storage; unknown/broken fields fall back to defaults. */
+/**
+ * Validates the top level of what was found in storage. The layout itself
+ * is validated against the real tabs later (`normalizeLayout`).
+ */
 export function sanitizeState(raw: unknown): SidebarState {
   const state = defaultState();
-  if (!raw || typeof raw !== 'object') return state;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return state;
   const saved = raw as Record<string, unknown>;
-  state.tab = saved.tab === 'settings' ? 'settings' : 'style';
-  if (typeof saved.ratio === 'number' && isFinite(saved.ratio)) state.ratio = saved.ratio;
+  if (saved.layout && typeof saved.layout === 'object' && !Array.isArray(saved.layout)) {
+    state.layout = saved.layout as SidebarState['layout'];
+  }
   if (saved.sectors && typeof saved.sectors === 'object' && !Array.isArray(saved.sectors)) {
     Object.keys(saved.sectors).forEach((id) => {
       state.sectors[id] = !!(saved.sectors as Record<string, unknown>)[id];
     });
   }
-  state.globalTab = typeof saved.globalTab === 'string' ? saved.globalTab : null;
   return state;
 }
 
 /**
  * Loads the persisted state (when `persist` is on) and returns a store
- * whose `save()` writes it back. With `persist: false` everything lives
- * in memory only.
+ * whose `save()` writes it back. With `persist: false` everything lives in
+ * memory only.
  */
-export function createStateStore(options: Pick<ResolvedOptions, 'persist' | 'storageKey'>): StateStore {
+export function createStateStore(options: { persist: boolean; storageKey: string }): StateStore {
   const storage = options.persist ? getStorage() : null;
   let state = defaultState();
   if (storage) {

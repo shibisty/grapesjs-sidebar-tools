@@ -9,22 +9,34 @@ describe('injectCss', () => {
     expect(styles).toHaveLength(1);
     expect(styles[0].textContent).toBe(CSS);
   });
+});
 
-  it('lets long translated tab labels wrap inside the tab instead of overflowing it', () => {
-    const rule = CSS.match(/\.gjs-lsb-tab\{[^}]*\}/)![0];
-    expect(rule).toContain('min-width:0');
-    expect(rule).toContain('overflow-wrap:break-word');
-    expect(rule).not.toContain('nowrap');
+describe('CSS', () => {
+  it('hides the core views panel and container while docked', () => {
+    expect(CSS).toContain('.gjs-st-docked .gjs-pn-views,.gjs-st-docked .gjs-pn-views-container{display:none !important;}');
   });
 
-  it('keeps hidden bottom panels hidden', () => {
-    expect(CSS).toContain('.gjs-lsb-panel[hidden]{display:none !important;}');
+  it('fits the canvas and the top panels between the zones', () => {
+    expect(CSS).toMatch(/\.gjs-st-docked \.gjs-cv-canvas\{left:var\(--gjs-st-left, 0px\);width:calc\(100% - var\(--gjs-st-left, 0px\) - var\(--gjs-st-right, 0px\)\);height:calc\(100% - var\(--gjs-canvas-top, 40px\) - var\(--gjs-st-bottom, 0px\)\)/);
+    expect(CSS).toContain('.gjs-st-docked .gjs-pn-commands{left:var(--gjs-st-left, 0px);');
+    expect(CSS).toContain('.gjs-st-docked .gjs-pn-options{right:var(--gjs-st-right, 0px);}');
   });
 
-  it('shows the resizer and bottom pane only in the open state', () => {
-    expect(CSS).toMatch(/\.gjs-lsb-resizer\{display:none;/);
-    expect(CSS).toMatch(/\.gjs-lsb-bottom\{display:none;/);
-    expect(CSS).toContain('.gjs-lsb-split--open .gjs-lsb-resizer{display:block;}');
-    expect(CSS).toContain('.gjs-lsb-split--open .gjs-lsb-bottom{display:flex;}');
+  it('keeps hidden panes and empty zones hidden', () => {
+    expect(CSS).toContain('.gjs-st-pane[hidden]{display:none !important;}');
+    expect(CSS).toContain('.gjs-st-zone--empty{display:none;}');
+  });
+
+  it('shows the drop strip of an empty zone only while dragging', () => {
+    expect(CSS).toMatch(/\.gjs-st-drop\{display:none;/);
+    expect(CSS).toContain('.gjs-st-dragging .gjs-st-zone--empty+.gjs-st-drop{display:flex;}');
+  });
+
+  it('uses the split ratio only for the first group of a split zone', () => {
+    expect(CSS).toContain('.gjs-st-zone--split>.gjs-st-group--first{flex:0 0 var(--gjs-st-ratio,50%);}');
+  });
+
+  it('keeps the canvas iframe from swallowing pointer events during a drag or resize', () => {
+    expect(CSS).toContain('.gjs-st-resizing .gjs-cv-canvas,.gjs-st-dragging .gjs-cv-canvas{pointer-events:none;}');
   });
 });

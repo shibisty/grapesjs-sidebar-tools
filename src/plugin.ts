@@ -1,70 +1,69 @@
 import type { Editor } from 'grapesjs';
-import { createGlobalTabMemory } from './globalTab';
+import { createDock, type Dock } from './dock';
 import { getLocale, isRtlLocale, registerI18n, t } from './i18n';
-import { findLayersRoot } from './layersRoot';
-import { createManagerMover, prerenderManager, type ManagerKey } from './managers';
+import { addTabs, findTab, layoutFromDefault, normalizeLayout, removeTabs } from './layout';
 import { resolveOptions } from './options';
 import { createSectorMemory } from './sectors';
-import { createSplitLayout, findSplitElement, type SplitLayout } from './splitLayout';
 import { createStateStore } from './state';
 import { injectCss } from './styles';
-import type { BottomTab, SidebarToolsLabels, SidebarToolsOptions } from './types';
+import type { DockLayout, SidebarToolsLabels, SidebarToolsOptions } from './types';
+import { buttonCommand, createViewController, findViewsPanel, getButtons, getEditorEl, type ViewController } from './views';
 
+/** Kept from 1.x: used by grapesjs-context-menu ("View styles"). */
 export const COMMAND_SHOW_STYLES = 'layers-sidebar:show-styles';
 export const COMMAND_SHOW_SETTINGS = 'layers-sidebar:show-settings';
-const LOG_PREFIX = '[grapesjs-sidebar-tools]';
+/** `editor.runCommand('sidebar-tools:show', { id: 'open-layers' })` */
+export const COMMAND_SHOW = 'sidebar-tools:show';
+/** Puts every tab back to the default layout. */
+export const COMMAND_RESET = 'sidebar-tools:reset-layout';
+/** Fired with `{ layout }` after every change of the dock. */
+export const EVENT_LAYOUT = 'sidebar-tools:layout';
 
-/**
- * Sync triggers: selection changes, any command run/stop (top tab
- * switching), new Style Manager sectors.
- */
-const SYNC_EVENTS = 'component:toggled run stop style:sector:add';
+const LOG_PREFIX = '[grapesjs-sidebar-tools]';
+const LABEL_KEYS: (keyof SidebarToolsLabels)[] = ['resizerTitle', 'zoneResizerTitle', 'dropHere'];
 
 /*
- * GrapesJS fires `i18n:locale` BEFORE the locale is stored (the new one
- * is in the payload) and `i18n:add` before the messages are merged;
- * `i18n:update` comes after the merge (addMessages -> setMessages).
+ * GrapesJS fires `i18n:locale` BEFORE the locale is stored (the new one is
+ * in the payload); `i18n:update` comes after messages were merged.
  */
 const I18N_LOCALE_EVENT = 'i18n:locale';
 const I18N_UPDATE_EVENT = 'i18n:update';
 
-const LABEL_KEYS: (keyof SidebarToolsLabels)[] = ['styleManagerTab', 'settingsTab', 'resizerTitle'];
+function isAlive(editor: Editor): boolean {
+  try {
+    const em: any = (editor as any).getModel?.();
+    return !em || !em.destroyed;
+  } catch {
+    return false;
+  }
+}
 
 export default function grapesjsSidebarTools(editor: Editor, opts: SidebarToolsOptions = {}): void {
+  const ed = editor as any;
   const options = resolveOptions(opts);
   registerI18n(editor);
   if (options.injectCss && typeof document !== 'undefined') injectCss(document);
 
   const store = createStateStore(options);
   const { state } = store;
-  const ed = editor as any;
-
-  let split: SplitLayout | null = null;
-  let warned = false;
-  let destroyed = false;
-  let syncTimer: ReturnType<typeof setTimeout> | null = null;
-  let resizeObserver: ResizeObserver | null = null;
-
-  const getManagerModule = (key: ManagerKey) =>
-    key === 'sm' ? ed.StyleManager || ed.Styles : ed.TraitManager || ed.Traits;
-  const managers = createManagerMover(getManagerModule, (key) =>
-    options.prerenderManagers ? prerenderManager(editor, key, getManagerModule(key)) : false,
-  );
   const sectors = createSectorMemory(() => ed.StyleManager || ed.Styles, state.sectors, store.save);
-  const globalTab = createGlobalTabMemory(editor, {
-    commands: options.globalTabCommands,
-    restore: options.restoreGlobalTab,
-    get: () => state.globalTab,
-    set: (id) => {
-      state.globalTab = id;
-      store.save();
-    },
-  });
+
+  let dock: Dock | null = null;
+  let views: ViewController | null = null;
+  let destroyed = false;
+  let pendingFocus: string | null = null;
+  let refreshFrame = 0;
+  let locale = getLocale(editor);
+  const offs: Array<() => void> = [];
+
+  const on = (event: string, cb: (...args: any[]) => void) => {
+    editor.on(event, cb);
+    offs.push(() => editor.off(event, cb));
+  };
 
   // ---- Texts ------------------------------------------------------------------
 
-  /** `labels` option first, then the translation for the locale. */
-  function getLabels(locale = getLocale(editor)): SidebarToolsLabels {
+  function getLabels(): SidebarToolsLabels {
     const labels = {} as SidebarToolsLabels;
     LABEL_KEYS.forEach((key) => {
       labels[key] = options.labels[key] || t(editor, key, undefined, locale);
@@ -72,142 +71,196 @@ export default function grapesjsSidebarTools(editor: Editor, opts: SidebarToolsO
     return labels;
   }
 
-  function applyLabels(locale = getLocale(editor)) {
-    if (split && !destroyed) split.setLabels(getLabels(locale), isRtlLocale(locale));
-  }
+  // ---- Canvas refresh ---------------------------------------------------------
 
-  const onLocaleChange = (data?: { value?: unknown }) =>
-    applyLabels(typeof data?.value === 'string' && data.value ? data.value : undefined);
-  const onMessagesUpdate = () => applyLabels();
-
-  // ---- Split layout ----------------------------------------------------------
-
-  function observe(el: HTMLElement) {
-    resizeObserver?.disconnect();
-    resizeObserver = null;
-    // Command-independent fallback: the layers container going to/from
-    // display:none (any custom tab switcher) changes its size.
-    if (typeof ResizeObserver !== 'undefined') {
-      resizeObserver = new ResizeObserver(() => scheduleSync());
-      resizeObserver.observe(el);
-    }
-  }
-
-  /** Builds the split (once the layers container exists) and returns it. */
-  function ensureSplit(): SplitLayout | null {
-    if (destroyed) return null;
-    if (split && split.el.isConnected) return split;
-    if (split && !split.el.isConnected) {
-      // The editor UI was re-rendered: start over.
-      managers.moveAllBack();
-      split = null;
-    }
-    const { el: host, explicit } = findLayersRoot(editor, options.layersContainer);
-    if (!host) {
-      if (explicit && !warned) {
-        warned = true;
-        // eslint-disable-next-line no-console
-        console.warn(`${LOG_PREFIX} Could not resolve the layers container, split layout skipped.`);
+  /** The canvas changed size: GrapesJS has to re-measure its offsets (highlighter, toolbar...). */
+  function scheduleRefresh() {
+    if (refreshFrame || destroyed) return;
+    const run = () => {
+      refreshFrame = 0;
+      if (destroyed || !isAlive(editor)) return;
+      try {
+        ed.refresh?.({ tools: true });
+      } catch {
+        // ignore
       }
-      return null;
+    };
+    refreshFrame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(run) : (setTimeout(run, 16) as any);
+  }
+
+  // ---- Layout -----------------------------------------------------------------
+
+  function onDockChange(layout: DockLayout, info: { reason: string; live?: boolean }) {
+    state.layout = layout;
+    if (!info.live) store.save();
+    scheduleRefresh();
+    if (!info.live) editor.trigger(EVENT_LAYOUT, { layout, reason: info.reason });
+  }
+
+  function focus(id: string) {
+    if (!dock) {
+      pendingFocus = id;
+      return;
     }
-    if (findSplitElement(host)) {
-      // Another instance of the plugin already owns this container.
-      return null;
+    dock.activate(id);
+  }
+
+  function initialLayout(tabIds: string[], preferredActive: string[]): DockLayout {
+    const raw = state.layout || layoutFromDefault(options.defaultLayout);
+    return normalizeLayout(raw, tabIds, {
+      preferredActive,
+      ratioBounds: [options.minRatio, options.maxRatio],
+    });
+  }
+
+  function wantsView(btn: any): boolean {
+    if (!options.views) return true;
+    const cmd = buttonCommand(btn);
+    return options.views.includes(String(btn.id)) || (!!cmd && options.views.includes(cmd));
+  }
+
+  function start() {
+    if (destroyed || !isAlive(editor) || dock) return;
+    const root = getEditorEl(editor);
+    const panel = findViewsPanel(editor, options.panelId);
+    if (!root || !panel) {
+      // eslint-disable-next-line no-console
+      console.warn(`${LOG_PREFIX} No views panel found: the dock needs the default GrapesJS panels (or the panelId option).`);
+      return;
     }
-    split = createSplitLayout(host, {
-      labels: getLabels(),
-      rtl: isRtlLocale(getLocale(editor)),
-      minRatio: options.minRatio,
-      maxRatio: options.maxRatio,
-      initialTab: state.tab,
-      initialRatio: state.ratio,
-      onTabChange(tab: BottomTab) {
-        state.tab = tab;
-        store.save();
-      },
-      onRatioCommit(ratio: number) {
-        state.ratio = ratio;
-        store.save();
+
+    views = createViewController(editor, {
+      onFocus: focus,
+      createPane(info) {
+        const pane = document.createElement('div');
+        pane.className = 'gjs-st-pane';
+        pane.setAttribute('data-tab', info.id);
+        pane.setAttribute('role', 'tabpanel');
+        return pane;
       },
     });
-    state.ratio = split.ratio; // clamped
-    observe(split.el);
-    return split;
-  }
 
-  // ---- Sync -----------------------------------------------------------------
-
-  function sync() {
-    syncTimer = null;
-    if (destroyed) return;
-    sectors.sync();
-    const s = ensureSplit();
-    if (!s) return;
-    const open = s.isVisible() && !!editor.getSelected();
-    s.setOpen(open);
-    if (open) {
-      managers.moveIn('sm', s.smContainer);
-      managers.moveIn('tm', s.tmContainer);
-      s.showTab(state.tab);
-    } else {
-      managers.moveAllBack();
+    const buttons = getButtons(panel).filter(wantsView);
+    const preferredActive = buttons.filter((b) => b.get('active')).map((b) => buttonCommand(b) || '');
+    buttons.forEach((btn) => views!.adopt(btn));
+    if (!views.views.length) {
+      // eslint-disable-next-line no-console
+      console.warn(`${LOG_PREFIX} None of the views panel buttons renders into the views container, nothing to dock.`);
+      views.destroy();
+      views = null;
+      return;
     }
+
+    const layout = initialLayout(
+      views.views.map((v) => v.id),
+      preferredActive,
+    );
+    state.layout = layout;
+
+    dock = createDock({
+      root,
+      layout,
+      getPane: (id) => views?.get(id)?.pane || null,
+      getInfo: (id) => views?.get(id),
+      getLabels,
+      isRtl: () => isRtlLocale(locale),
+      defaultSizes: options.sizes,
+      minSize: options.minSize,
+      minRatio: options.minRatio,
+      maxRatio: options.maxRatio,
+      onChange: onDockChange,
+    });
+    if (pendingFocus) dock.activate(pendingFocus);
+    pendingFocus = null;
+    sectors.sync();
+    scheduleRefresh();
+
+    // Buttons added / removed later (plugins that register their view late).
+    const buttonsColl = panel.get('buttons');
+    const onAdd = (btn: any) =>
+      setTimeout(() => {
+        if (destroyed || !views || !dock || !wantsView(btn)) return;
+        const view = views.adopt(btn);
+        if (view) dock.setLayout(addTabs(dock.layout, [view.id]));
+      }, 0);
+    const onRemove = (btn: any) => {
+      const cmd = buttonCommand(btn);
+      if (!cmd || !views?.get(cmd) || !dock) return;
+      views.release(cmd);
+      dock.setLayout(removeTabs(dock.layout, [cmd]));
+    };
+    buttonsColl?.on?.('add', onAdd);
+    buttonsColl?.on?.('remove', onRemove);
+    offs.push(() => {
+      buttonsColl?.off?.('add', onAdd);
+      buttonsColl?.off?.('remove', onRemove);
+    });
+
+    const onResize = () => {
+      if (!isAlive(editor)) return cleanup();
+      dock?.applySizes();
+      scheduleRefresh();
+    };
+    window.addEventListener('resize', onResize);
+    offs.push(() => window.removeEventListener('resize', onResize));
   }
 
-  function scheduleSync() {
-    if (destroyed) return;
-    if (syncTimer) clearTimeout(syncTimer);
-    syncTimer = setTimeout(sync, 0);
-  }
+  // ---- Commands ---------------------------------------------------------------
 
-  // ---- Commands (public API, used by grapesjs-layers-context-menu) ----------
-
-  function showBottomTab(tab: BottomTab) {
-    const s = ensureSplit();
-    if (!s) return;
-    s.showTab(tab);
-    sync();
-  }
-
-  editor.Commands.add(COMMAND_SHOW_STYLES, { run: () => showBottomTab('style') });
-  editor.Commands.add(COMMAND_SHOW_SETTINGS, { run: () => showBottomTab('settings') });
-
-  // ---- Wiring ---------------------------------------------------------------
-
-  const onRun = (id: unknown) => globalTab.onRun(id);
-
-  const onLoad = () => {
-    ensureSplit();
-    editor.on(SYNC_EVENTS, scheduleSync);
-    editor.on(I18N_LOCALE_EVENT, onLocaleChange);
-    editor.on(I18N_UPDATE_EVENT, onMessagesUpdate);
-    scheduleSync();
-    setTimeout(() => {
-      if (!destroyed) globalTab.restore();
-    }, 0);
+  const showTab = (id: string | undefined | null) => {
+    if (!id) return;
+    if (dock && !findTab(dock.layout, id)) return;
+    focus(id);
   };
+  editor.Commands.add(COMMAND_SHOW_STYLES, { run: () => showTab(options.stylesTab) });
+  editor.Commands.add(COMMAND_SHOW_SETTINGS, { run: () => showTab(options.settingsTab) });
+  editor.Commands.add(COMMAND_SHOW, { run: (_ed: Editor, _s: unknown, o: { id?: string } = {}) => showTab(o?.id) });
+  editor.Commands.add(COMMAND_RESET, {
+    run: () => {
+      if (!dock || !views) return;
+      state.layout = null;
+      const layout = initialLayout(
+        views.views.map((v) => v.id),
+        [],
+      );
+      dock.setLayout(layout);
+      onDockChange(layout, { reason: 'set' });
+    },
+  });
 
-  const onDestroy = () => {
+  // ---- Wiring -----------------------------------------------------------------
+
+  const onLocale = (data?: { value?: unknown }) => {
+    locale = typeof data?.value === 'string' && data.value ? data.value : getLocale(editor);
+    dock?.updateLabels();
+  };
+  const onMessages = () => {
+    locale = getLocale(editor);
+    dock?.updateLabels();
+  };
+  on(I18N_LOCALE_EVENT, onLocale);
+  on(I18N_UPDATE_EVENT, onMessages);
+  on('style:sector:add', () => sectors.sync());
+
+  function cleanup() {
     if (destroyed) return;
     destroyed = true;
-    if (syncTimer) clearTimeout(syncTimer);
-    syncTimer = null;
-    resizeObserver?.disconnect();
-    resizeObserver = null;
-    editor.off(SYNC_EVENTS, scheduleSync);
-    editor.off(I18N_LOCALE_EVENT, onLocaleChange);
-    editor.off(I18N_UPDATE_EVENT, onMessagesUpdate);
-    editor.off('run', onRun);
-    editor.off('load', onLoad);
-    globalTab.destroy();
+    if (refreshFrame) {
+      if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(refreshFrame);
+      clearTimeout(refreshFrame);
+    }
+    offs.splice(0).forEach((off) => off());
     sectors.destroy();
-    managers.moveAllBack();
-    split?.destroy();
-    split = null;
-  };
+    dock?.destroy();
+    dock = null;
+    views?.destroy();
+    views = null;
+  }
 
-  editor.on('load', onLoad);
-  editor.on('run', onRun);
-  editor.on('destroy', onDestroy);
+  // Plugins that mount their view in their own onReady/load handler must be
+  // done before the views are captured: start one tick after load.
+  const onLoad = () => setTimeout(start, 0);
+  if (typeof ed.onReady === 'function') ed.onReady(onLoad);
+  else on('load', onLoad);
+  on('destroy', cleanup);
 }
