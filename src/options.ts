@@ -1,3 +1,4 @@
+import { DEFAULT_ZOOM_LEVELS } from './devices';
 import type { ResolvedOptions, SidebarToolsOptions, ZoneId } from './types';
 
 export const DEFAULT_OPTIONS: ResolvedOptions = {
@@ -13,6 +14,11 @@ export const DEFAULT_OPTIONS: ResolvedOptions = {
   maxRatio: 0.85,
   stylesTab: 'open-sm',
   settingsTab: 'open-tm',
+  deviceBar: true,
+  zoomLevels: DEFAULT_ZOOM_LEVELS.slice(),
+  hideDevicePanel: true,
+  fixDeviceCommands: true,
+  workspace: true,
   // Empty: texts come from editor.I18n (see src/i18n), `labels` only overrides.
   labels: {},
 };
@@ -100,6 +106,16 @@ export function resolveOptions(opts?: SidebarToolsOptions | null): ResolvedOptio
     maxRatio,
     stylesTab: typeof o.stylesTab === 'string' && o.stylesTab ? o.stylesTab : DEFAULT_OPTIONS.stylesTab,
     settingsTab: typeof o.settingsTab === 'string' && o.settingsTab ? o.settingsTab : DEFAULT_OPTIONS.settingsTab,
+    deviceBar: o.deviceBar !== false,
+    zoomLevels: (() => {
+      const levels = Array.isArray(o.zoomLevels)
+        ? o.zoomLevels.filter((l) => typeof l === 'number' && isFinite(l) && l >= 10 && l <= 400)
+        : [];
+      return levels.length ? Array.from(new Set(levels)).sort((a, b) => a - b) : DEFAULT_ZOOM_LEVELS.slice();
+    })(),
+    hideDevicePanel: o.hideDevicePanel !== false,
+    fixDeviceCommands: o.fixDeviceCommands !== false,
+    workspace: o.workspace !== false,
     labels,
   };
 }

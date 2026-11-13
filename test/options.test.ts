@@ -43,6 +43,21 @@ describe('resolveOptions', () => {
     expect(o.minSize).toEqual({ side: 180, bottom: 120 });
     expect(o.stylesTab).toBe('open-sm');
     expect(o.settingsTab).toBe('open-tm');
+    expect(o.deviceBar).toBe(true);
+    expect(o.hideDevicePanel).toBe(true);
+    expect(o.fixDeviceCommands).toBe(true);
+    expect(o.zoomLevels).toContain(100);
+  });
+
+  it('workspace option', () => {
+    expect(resolveOptions({}).workspace).toBe(true);
+    expect(resolveOptions({ workspace: false }).workspace).toBe(false);
+  });
+
+  it('device toolbar options', () => {
+    const o = resolveOptions({ deviceBar: false, hideDevicePanel: false, fixDeviceCommands: false, zoomLevels: [200, 50, 50, 5, 'x' as any] });
+    expect(o).toMatchObject({ deviceBar: false, hideDevicePanel: false, fixDeviceCommands: false, zoomLevels: [50, 200] });
+    expect(resolveOptions({ zoomLevels: [] }).zoomLevels).toEqual(DEFAULT_OPTIONS.zoomLevels);
   });
 
   it('keeps only non-empty string label overrides', () => {

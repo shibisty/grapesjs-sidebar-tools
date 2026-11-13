@@ -10,6 +10,7 @@ import {
   moveTab,
   normalizeLayout,
   removeTabs,
+  setZoneCollapsed,
   setZoneRatio,
   setZoneSize,
 } from '../src/layout';
@@ -183,6 +184,17 @@ describe('helpers', () => {
     expect(setZoneSize(b, 'left', 320).left.size).toBe(320);
     expect(setZoneSize(b, 'left', null)).toBe(b);
     expect(setZoneRatio(b, 'left', 0.3).left.ratio).toBe(0.3);
+  });
+
+  it('setZoneCollapsed toggles and keeps the collapsed flag through normalize/clone', () => {
+    const b = base();
+    const c = setZoneCollapsed(b, 'right');
+    expect(c.right.collapsed).toBe(true);
+    expect(setZoneCollapsed(c, 'right', true)).toBe(c);
+    expect(setZoneCollapsed(c, 'right').right.collapsed).toBe(false);
+    expect(normalizeLayout(c, ALL).right.collapsed).toBe(true);
+    expect(normalizeLayout({ right: { collapsed: 'yes', groups: [] } }, ALL).right.collapsed).toBe(false);
+    expect(moveTab(c, 'open-sm', { kind: 'zone', zone: 'left' }).right.collapsed).toBe(true);
   });
 
   it('addTabs / removeTabs', () => {

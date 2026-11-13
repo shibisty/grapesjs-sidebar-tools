@@ -66,6 +66,11 @@ describe('hitTest', () => {
     expect(hit!.indicator).toEqual(box(0, 40, 56, 760));
   });
 
+  it('a collapsed zone (rail) joins its group instead of creating one', () => {
+    const hit = hitTest(1380, 300, [], [{ zone: 'right', box: box(1360, 0, 40, 800), join: { group: 0, index: 4 } }]);
+    expect(hit!.target).toEqual({ kind: 'tabs', zone: 'right', group: 0, index: 4 });
+  });
+
   it('nothing under the pointer', () => {
     expect(hitTest(500, 300, [rightGroup()], [{ zone: 'left', box: box(0, 40, 56, 760) }])).toBeNull();
   });

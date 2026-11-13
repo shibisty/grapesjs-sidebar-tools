@@ -13,8 +13,10 @@
 import { hitTest, type EmptyZoneBox, type GroupBoxes, type Hit } from './dnd';
 import {
   activateTab,
+  findTab,
   isValidTarget,
   moveTab,
+  setZoneCollapsed,
   setZoneRatio,
   setZoneSize,
   type DropTarget,
@@ -30,6 +32,10 @@ export const CLS = {
   zone: 'gjs-st-zone',
   zoneEmpty: 'gjs-st-zone--empty',
   zoneSplit: 'gjs-st-zone--split',
+  zoneCollapsed: 'gjs-st-zone--collapsed',
+  rail: 'gjs-st-rail',
+  stash: 'gjs-st-stash',
+  collapse: 'gjs-st-collapse',
   group: 'gjs-st-group',
   tabs: 'gjs-st-tabs',
   tab: 'gjs-st-tab',
@@ -49,6 +55,13 @@ export const VARS: Record<ZoneId, string> = {
   right: '--gjs-st-right',
   bottom: '--gjs-st-bottom',
 };
+
+/** Size of a collapsed zone (the rail with the tab icons), px. */
+export const RAIL_SIZE = { side: 40, bottom: 36 };
+
+/** Chevron used by the collapse / expand buttons (rotated by CSS per zone). */
+const CHEVRON =
+  '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M15.41,16.58L10.83,12L15.41,7.41L14,6L8,12L14,18L15.41,16.58Z"/></svg>';
 
 /** The canvas never gets smaller than this because of the zones (px, includes the top bar). */
 export const MIN_CANVAS = { width: 320, height: 240 };
@@ -72,7 +85,7 @@ export interface DockOptions {
    * Called after every change made by the user (or through the API).
    * `live` is true while a resizer is being dragged (don't persist yet).
    */
-  onChange(layout: DockLayout, info: { reason: 'move' | 'activate' | 'size' | 'ratio' | 'set'; live?: boolean }): void;
+  onChange(layout: DockLayout, info: { reason: 'move' | 'activate' | 'size' | 'ratio' | 'set' | 'collapse'; live?: boolean }): void;
 }
 
 export interface Dock {
@@ -84,6 +97,8 @@ export interface Dock {
   updateLabels(): void;
   /** Zone sizes in px as currently applied (0 = empty zone). */
   appliedSizes(): Record<ZoneId, number>;
+  /** Collapses / expands a zone (`collapsed` undefined = toggle). */
+  setCollapsed(zone: ZoneId, collapsed?: boolean): void;
   /** Re-applies the sizes (e.g. after the editor was resized). */
   applySizes(): void;
   /** Applies a drop as if the user dropped `id` on `target`. */
@@ -139,6 +154,7 @@ export function createDock(opts: DockOptions): Dock {
   function wantedSize(zone: ZoneId, width: number): number {
     if (!layout[zone].groups.length) return 0;
     const side = zone !== 'bottom';
+    if (layout[zone].collapsed) return side ? RAIL_SIZE.side : RAIL_SIZE.bottom;
     const min = side ? opts.minSize.side : opts.minSize.bottom;
     let size = layout[zone].size ?? opts.defaultSizes[zone] ?? null;
     if (size == null) size = side && width ? Math.round(width * 0.15) : min;
@@ -158,15 +174,18 @@ export function createDock(opts: DockOptions): Dock {
       const room = width - MIN_CANVAS.width;
       const total = out.left + out.right;
       if (total > room) {
-        const min = opts.minSize.side;
-        const shrink = (v: number) => (v ? Math.max(min, Math.floor((v * Math.max(room, 0)) / total)) : 0);
-        out.left = shrink(out.left);
-        out.right = shrink(out.right);
+        const minOf = (zone: ZoneId) => (layout[zone].collapsed ? RAIL_SIZE.side : opts.minSize.side);
+        const shrink = (zone: ZoneId) =>
+          out[zone] && !layout[zone].collapsed
+            ? Math.max(minOf(zone), Math.floor((out[zone] * Math.max(room, 0)) / total))
+            : out[zone];
+        out.left = shrink('left');
+        out.right = shrink('right');
         // A zone stuck at its minimum: the other one gives up the rest.
         const excess = out.left + out.right - room;
         if (excess > 0) {
           const big: ZoneId = out.left >= out.right ? 'left' : 'right';
-          out[big] = Math.max(min, out[big] - excess);
+          out[big] = Math.max(minOf(big), out[big] - excess);
         }
       }
     }
@@ -183,6 +202,7 @@ export function createDock(opts: DockOptions): Dock {
       applied[zone] = sizes[zone];
       root.style.setProperty(VARS[zone], `${applied[zone]}px`);
       zoneEls[zone].classList.toggle(CLS.zoneEmpty, !layout[zone].groups.length);
+      zoneEls[zone].classList.toggle(CLS.zoneCollapsed, !!layout[zone].collapsed && !!layout[zone].groups.length);
       const ratio = clamp(layout[zone].ratio, opts.minRatio, opts.maxRatio);
       zoneEls[zone].style.setProperty('--gjs-st-ratio', `${ratio * 100}%`);
     });
@@ -204,6 +224,35 @@ export function createDock(opts: DockOptions): Dock {
     return tab;
   }
 
+  function collapseButton(zone: ZoneId, collapsed: boolean, labels: SidebarToolsLabels): HTMLElement {
+    const btn = el('span', `gjs-pn-btn ${CLS.collapse} ${CLS.collapse}--${zone}${collapsed ? ` ${CLS.collapse}--expand` : ''}`);
+    btn.innerHTML = CHEVRON;
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', '0');
+    btn.setAttribute('data-collapse', zone);
+    btn.setAttribute('aria-expanded', String(!collapsed));
+    btn.title = collapsed ? labels.expand : labels.collapse;
+    return btn;
+  }
+
+  /** A collapsed zone: the expand button and the icons of all its tabs. */
+  function renderRail(zone: ZoneId, z: HTMLElement, labels: SidebarToolsLabels) {
+    const rail = el('div', `${CLS.rail} gjs-pn-buttons`);
+    rail.setAttribute('role', 'tablist');
+    rail.appendChild(collapseButton(zone, true, labels));
+    const stash = el('div', CLS.stash);
+    stash.hidden = true;
+    layout[zone].groups.forEach((g) =>
+      g.tabs.forEach((id) => {
+        rail.appendChild(renderTab(id, false));
+        const pane = opts.getPane(id);
+        if (pane) stash.appendChild(pane); // keep the content in the document
+      }),
+    );
+    z.appendChild(rail);
+    z.appendChild(stash);
+  }
+
   function render() {
     if (destroyed) return;
     const labels = opts.getLabels();
@@ -213,7 +262,18 @@ export function createDock(opts: DockOptions): Dock {
       z.querySelectorAll<HTMLElement>(`.${CLS.pane}`).forEach((p) => p.remove());
       z.textContent = '';
       const groups = layout[zone].groups;
-      z.classList.toggle(CLS.zoneSplit, groups.length > 1);
+      const collapsed = !!layout[zone].collapsed && groups.length > 0;
+      z.classList.toggle(CLS.zoneSplit, groups.length > 1 && !collapsed);
+
+      dropEls[zone].textContent = '';
+      const hint = el('span', `${CLS.drop}__label`);
+      hint.textContent = labels.dropHere;
+      dropEls[zone].appendChild(hint);
+
+      if (collapsed) {
+        renderRail(zone, z, labels);
+        return;
+      }
 
       groups.forEach((g, gi) => {
         if (gi > 0) {
@@ -239,6 +299,12 @@ export function createDock(opts: DockOptions): Dock {
             body.appendChild(pane);
           }
         });
+        if (gi === 0) {
+          // The collapse button: outer end of the first tab bar.
+          const btn = collapseButton(zone, false, labels);
+          if (zone === 'right') bar.insertBefore(btn, bar.firstChild);
+          else bar.appendChild(btn);
+        }
         group.appendChild(bar);
         group.appendChild(body);
         z.appendChild(group);
@@ -251,16 +317,11 @@ export function createDock(opts: DockOptions): Dock {
       edge.addEventListener('pointerdown', (e) => startZoneResize(e, zone, edge));
       edge.addEventListener('dblclick', () => commit(setZoneSize(layout, zone, null), 'size'));
       z.appendChild(edge);
-
-      dropEls[zone].textContent = '';
-      const hint = el('span', `${CLS.drop}__label`);
-      hint.textContent = labels.dropHere;
-      dropEls[zone].appendChild(hint);
     });
     applySizes();
   }
 
-  function commit(next: DockLayout, reason: 'move' | 'activate' | 'size' | 'ratio' | 'set', live = false) {
+  function commit(next: DockLayout, reason: 'move' | 'activate' | 'size' | 'ratio' | 'set' | 'collapse', live = false) {
     if (destroyed) return;
     if (next === layout && !live) return;
     layout = next;
@@ -269,8 +330,16 @@ export function createDock(opts: DockOptions): Dock {
     opts.onChange(layout, { reason, live });
   }
 
+  /** Shows `id` in its group, expanding its zone when it is collapsed. */
   function activate(id: string) {
-    commit(activateTab(layout, id), 'activate');
+    let next = activateTab(layout, id);
+    const loc = findTab(next, id);
+    if (loc && next[loc.zone].collapsed) next = setZoneCollapsed(next, loc.zone, false);
+    commit(next, 'activate');
+  }
+
+  function setCollapsed(zone: ZoneId, collapsed?: boolean) {
+    commit(setZoneCollapsed(layout, zone, collapsed), 'collapse');
   }
 
   // ---- Tabs: click / keyboard / drag ----------------------------------------------
@@ -307,7 +376,10 @@ export function createDock(opts: DockOptions): Dock {
           body: box(body),
         });
       });
-      if (!groupEls.length) empty.push({ zone, box: box(dropEls[zone]) });
+      const rail = z.querySelector<HTMLElement>(`:scope > .${CLS.rail}`);
+      if (rail && layout[zone].groups.length) {
+        empty.push({ zone, box: box(rail), join: { group: 0, index: layout[zone].groups[0].tabs.length } });
+      } else if (!groupEls.length) empty.push({ zone, box: box(dropEls[zone]) });
     });
     return { groups, empty };
   }
@@ -410,7 +482,20 @@ export function createDock(opts: DockOptions): Dock {
     document.addEventListener('keydown', onDocKey, true);
   }
 
+  function onClick(e: MouseEvent) {
+    const btn = (e.target as HTMLElement).closest?.('[data-collapse]') as HTMLElement | null;
+    if (!btn || !root.contains(btn)) return;
+    e.preventDefault();
+    setCollapsed(btn.getAttribute('data-collapse') as ZoneId);
+  }
+
   function onKeyDown(e: KeyboardEvent) {
+    const collapseBtn = (e.target as HTMLElement).closest?.('[data-collapse]') as HTMLElement | null;
+    if (collapseBtn && root.contains(collapseBtn) && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      setCollapsed(collapseBtn.getAttribute('data-collapse') as ZoneId);
+      return;
+    }
     const tab = (e.target as HTMLElement).closest?.(`.${CLS.tab}`) as HTMLElement | null;
     if (!tab || !root.contains(tab)) return;
     if (e.key === 'Enter' || e.key === ' ') {
@@ -433,15 +518,19 @@ export function createDock(opts: DockOptions): Dock {
 
   root.addEventListener('pointerdown', onPointerDown);
   root.addEventListener('keydown', onKeyDown);
+  root.addEventListener('click', onClick);
   cleanups.push(() => {
     root.removeEventListener('pointerdown', onPointerDown);
     root.removeEventListener('keydown', onKeyDown);
+    root.removeEventListener('click', onClick);
   });
 
   function dropTab(id: string, target: DropTarget): boolean {
     if (!isValidTarget(layout, target)) return false;
-    const next = moveTab(layout, id, target);
+    let next = moveTab(layout, id, target);
     if (next === layout) return false;
+    // Dropped on a collapsed zone (its rail): show it.
+    if (next[target.zone].collapsed) next = setZoneCollapsed(next, target.zone, false);
     commit(next, 'move');
     return true;
   }
@@ -529,6 +618,7 @@ export function createDock(opts: DockOptions): Dock {
       render();
     },
     activate,
+    setCollapsed,
     updateLabels: render,
     appliedSizes: () => ({ ...applied }),
     applySizes,

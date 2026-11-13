@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDock, type Dock, type DockOptions } from '../src/dock';
 import { normalizeLayout, layoutFromDefault } from '../src/layout';
 import type { DockLayout, ZoneId } from '../src/types';
+import en from '../src/i18n/locales/en';
 
 const TABS = ['a', 'b', 'c', 'd'];
-const labels = { resizerTitle: 'split', zoneResizerTitle: 'edge', dropHere: 'drop' };
+
+const labels = { ...en, resizerTitle: 'split', zoneResizerTitle: 'edge', dropHere: 'drop', collapse: 'fold', expand: 'unfold' };
 
 /*
  * Fake geometry (jsdom has no layout): editor 1400x800, zones left 0-260,
@@ -27,6 +29,7 @@ function rectFor(el: Element): DOMRect {
   const zx = zone === 'left' ? [0, 260] : zone === 'right' ? [1190, 210] : [260, 930];
   const zy = zone === 'bottom' ? [560, 240] : [0, 800];
   if (html.classList.contains('gjs-st-zone')) return r(zx[0], zy[0], zx[1], zy[1]);
+  if (html.classList.contains('gjs-st-rail')) return r(zx[0], zy[0], zx[1], zy[1]);
   const group = html.closest<HTMLElement>('.gjs-st-group');
   if (!group) return r(0, 0, 0, 0);
   const split = zoneEl!.classList.contains('gjs-st-zone--split');
@@ -315,3 +318,72 @@ describe('resizers', () => {
     expect(dock!.layout.left.ratio).toBe(0.5);
   });
 });
+
+describe('collapse / expand', () => {
+  const zoneEl = (zone: string) => rootEl.querySelector<HTMLElement>(`.gjs-st-zone--${zone}`)!;
+  const click = (node: Element) => node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+  it('every non-empty zone has a collapse button in its first tab bar', () => {
+    setup({ left: [['a'], ['b']], bottom: [['c']] });
+    ['left', 'right', 'bottom'].forEach((z) => {
+      const bars = zoneEl(z).querySelectorAll('.gjs-st-tabs');
+      expect(bars[0].querySelector('.gjs-st-collapse'), z).not.toBeNull();
+      if (bars[1]) expect(bars[1].querySelector('.gjs-st-collapse')).toBeNull();
+    });
+    expect(zoneEl('left').querySelector('.gjs-st-collapse')!.getAttribute('title')).toBe('fold');
+  });
+
+  it('collapses to a rail with all tab icons and keeps the panes in the document', () => {
+    const { panes } = setup({ left: [['a'], ['b']] });
+    click(zoneEl('left').querySelector('.gjs-st-collapse')!);
+    expect(dock!.layout.left.collapsed).toBe(true);
+    expect(zoneEl('left').classList.contains('gjs-st-zone--collapsed')).toBe(true);
+    expect(rootEl.style.getPropertyValue('--gjs-st-left')).toBe('40px');
+    const rail = zoneEl('left').querySelector('.gjs-st-rail')!;
+    expect(Array.from(rail.querySelectorAll('.gjs-st-tab')).map((t) => t.getAttribute('data-tab'))).toEqual(['a', 'b']);
+    expect(rail.querySelector('.gjs-st-collapse')!.getAttribute('title')).toBe('unfold');
+    expect(panes.a.isConnected).toBe(true);
+    expect(panes.a.closest('.gjs-st-stash')).not.toBeNull();
+    expect(changes[changes.length - 1].reason).toBe('collapse');
+  });
+
+  it('expands with its button, or by clicking a tab on the rail', () => {
+    setup({ left: [['a', 'b']] });
+    dock!.setCollapsed('left', true);
+    click(zoneEl('left').querySelector('.gjs-st-collapse')!);
+    expect(dock!.layout.left.collapsed).toBe(false);
+    dock!.setCollapsed('left', true);
+    const tab = zoneEl('left').querySelector<HTMLElement>('.gjs-st-rail .gjs-st-tab[data-tab="b"]')!;
+    const r = tab.getBoundingClientRect();
+    pointer('pointerdown', tab, r.left + 2, r.top + 2);
+    pointer('pointerup', document, r.left + 2, r.top + 2);
+    expect(dock!.layout.left.collapsed).toBe(false);
+    expect(dock!.layout.left.groups[0].active).toBe('b');
+  });
+
+  it('keyboard: Enter on the collapse button', () => {
+    setup();
+    zoneEl('right')
+      .querySelector('.gjs-st-collapse')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(dock!.layout.right.collapsed).toBe(true);
+  });
+
+  it('activate() of a tab in a collapsed zone expands it', () => {
+    setup();
+    dock!.setCollapsed('right', true);
+    dock!.activate('c');
+    expect(dock!.layout.right.collapsed).toBe(false);
+    expect(dock!.layout.right.groups[0].active).toBe('c');
+  });
+
+  it('a tab dropped on a rail joins that zone and expands it', () => {
+    setup({ left: [['a']] });
+    dock!.setCollapsed('left', true);
+    // the rail of the collapsed left zone is 0..260 in the fake geometry
+    dragTab('c', 20, 300);
+    expect(zoneTabs(dock!.layout).left).toEqual(['a,c']);
+    expect(dock!.layout.left.collapsed).toBe(false);
+  });
+});
+

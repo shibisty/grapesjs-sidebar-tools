@@ -28,6 +28,8 @@ export interface GroupBoxes {
 export interface EmptyZoneBox {
   zone: ZoneId;
   box: Box;
+  /** A collapsed zone (its rail): dropping joins this group at this index instead of creating one. */
+  join?: { group: number; index: number };
 }
 
 export interface Hit {
@@ -102,7 +104,10 @@ export function hitTest(
   }
   for (const z of emptyZones) {
     if (contains(z.box, x, y)) {
-      return { target: { kind: 'zone', zone: z.zone }, indicator: { ...z.box } };
+      const target: DropTarget = z.join
+        ? { kind: 'tabs', zone: z.zone, group: z.join.group, index: z.join.index }
+        : { kind: 'zone', zone: z.zone };
+      return { target, indicator: { ...z.box } };
     }
   }
   return null;

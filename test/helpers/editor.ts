@@ -14,6 +14,7 @@ export const flush = (ms = 0) => new Promise<void>((r) => setTimeout(r, ms));
 export async function createEditor(
   opts: SidebarToolsOptions = {},
   extraPlugins: Array<(ed: Editor) => void> = [],
+  config: Record<string, unknown> = {},
 ): Promise<Editor> {
   const container = document.createElement('div');
   container.id = 'gjs';
@@ -24,7 +25,9 @@ export async function createEditor(
     storageManager: false,
     telemetry: false,
     components: SAMPLE_HTML,
-    plugins: [(ed: Editor) => plugin(ed, opts), ...extraPlugins],
+    ...config,
+    // other plugins first, like grapesjs-preset-webpage before this one in a page
+    plugins: [...extraPlugins, (ed: Editor) => plugin(ed, opts)],
   } as Parameters<typeof grapesjs.init>[0]);
   await new Promise<void>((resolve) => editor.onReady(() => resolve()));
   await flush(5);
@@ -33,7 +36,8 @@ export async function createEditor(
 
 export async function destroyEditor(editor: Editor | undefined): Promise<void> {
   if (!editor) return;
-  // Let GrapesJS' own debounced handlers run before the teardown.
+  // Let GrapesJS' own debounced handlers run before the teardown (a zoom
+  // change schedules a 300ms one).
   await flush(10);
   try {
     editor.trigger('destroy');

@@ -28,6 +28,8 @@ export function sanitizeState(raw: unknown): SidebarState {
   if (saved.layout && typeof saved.layout === 'object' && !Array.isArray(saved.layout)) {
     state.layout = saved.layout as SidebarState['layout'];
   }
+  if (saved.devices && typeof saved.devices === 'object' && !Array.isArray(saved.devices)) state.devices = saved.devices;
+  if (saved.workspace && typeof saved.workspace === 'object' && !Array.isArray(saved.workspace)) state.workspace = saved.workspace;
   if (saved.sectors && typeof saved.sectors === 'object' && !Array.isArray(saved.sectors)) {
     Object.keys(saved.sectors).forEach((id) => {
       state.sectors[id] = !!(saved.sectors as Record<string, unknown>)[id];

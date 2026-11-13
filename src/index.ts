@@ -18,6 +18,12 @@
  *   sidebar-tools:reset-layout     -> back to the default layout
  *   layers-sidebar:show-styles     -> show the Style Manager tab (grapesjs-context-menu)
  *   layers-sidebar:show-settings   -> show the Settings tab
+ *   sidebar-tools:toggle-zone      -> collapse / expand a zone
+ *   sidebar-tools:set-device / zoom -> device toolbar
+ *   sidebar-tools:workspace-grid   -> split the workspace into 1–4 areas
+ *
+ * Workspace: a tab bar of documents above the canvas; other plugins open
+ * tabs through `editor.SidebarTools.onReady(ws => ws.open({...}))`.
  *
  * Usage:
  *   import grapesjsSidebarTools from 'grapesjs-sidebar-tools';
@@ -37,5 +43,8 @@ export type {
   ZoneState,
 } from './types';
 export type { SidebarToolsMessages } from './i18n/types';
+export type { SidebarToolsApi } from './plugin';
+export type { OpenOptions, WorkspaceApi, WorkspaceDocInfo, WorkspaceDocInput } from './workspace';
+export type { WsGrid, WsLayout } from './wsLayout';
 
 export default plugin;

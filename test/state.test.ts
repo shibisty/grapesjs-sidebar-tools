@@ -54,4 +54,12 @@ describe('createStateStore', () => {
     });
     expect(() => store.save()).not.toThrow();
   });
+
+  it('keeps object devices and workspace states', () => {
+    const s = sanitizeState({ devices: { zoom: 50 }, workspace: { grid: '2h' }, layout: [] });
+    expect(s.devices).toEqual({ zoom: 50 });
+    expect(s.workspace).toEqual({ grid: '2h' });
+    expect(s.layout).toBeNull();
+    expect(sanitizeState({ workspace: [1] }).workspace).toBeUndefined();
+  });
 });

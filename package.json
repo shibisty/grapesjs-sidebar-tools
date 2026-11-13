@@ -1,7 +1,7 @@
 {
   "name": "grapesjs-sidebar-tools",
-  "version": "2.0.0",
-  "description": "GrapesJS plugin: dockable tool panels — drag Styles, Settings, Layers, Blocks (and other plugins' views) into left, right and bottom zones around the canvas; side zones split in two; sizes and layout remembered.",
+  "version": "2.2.0",
+  "description": "GrapesJS plugin: dockable tool panels and a device toolbar with zoom — drag Styles, Settings, Layers, Blocks (and other plugins' views) into left, right and bottom zones around the canvas; side zones split in two; sizes and layout remembered.",
   "type": "module",
   "main": "./dist/grapesjs-sidebar-tools.umd.cjs",
   "module": "./dist/grapesjs-sidebar-tools.js",

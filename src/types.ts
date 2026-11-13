@@ -30,6 +30,8 @@ export interface ZoneState {
   ratio: number;
   /** 0–2 groups for left/right (top and bottom half), 0–1 for bottom. */
   groups: GroupState[];
+  /** Collapsed to a narrow rail with the tab icons. */
+  collapsed?: boolean;
 }
 
 /** The whole dock: what is persisted in localStorage. */
@@ -85,6 +87,30 @@ export interface SidebarToolsOptions {
    */
   stylesTab?: string;
   settingsTab?: string;
+  /**
+   * Device toolbar above the canvas (devices, width × height, zoom).
+   * Default: `true`.
+   */
+  deviceBar?: boolean;
+  /** Zoom levels of the device toolbar, percent. */
+  zoomLevels?: number[];
+  /**
+   * Hide the GrapesJS devices panel (`devices-c`, the Desktop / Tablet /
+   * Mobile buttons of the top bar) while the device toolbar is shown.
+   * Default: `true`.
+   */
+  hideDevicePanel?: boolean;
+  /**
+   * Make `set-device-desktop` / `set-device-tablet` / `set-device-mobile`
+   * (grapesjs-preset-webpage) find the device by kind instead of by an
+   * exact name (`'Mobile portrait'` usually does not exist). Default: `true`.
+   */
+  fixDeviceCommands?: boolean;
+  /**
+   * Workspace with document tabs under the top bar (pages, blueprint
+   * editors... of other plugins), split into 1–4 areas. Default: `true`.
+   */
+  workspace?: boolean;
   /** Fixed texts that override the translations (any subset). */
   labels?: Partial<SidebarToolsLabels>;
 }
@@ -102,6 +128,11 @@ export interface ResolvedOptions {
   maxRatio: number;
   stylesTab: string;
   settingsTab: string;
+  deviceBar: boolean;
+  zoomLevels: number[];
+  hideDevicePanel: boolean;
+  fixDeviceCommands: boolean;
+  workspace: boolean;
   labels: Partial<SidebarToolsLabels>;
 }
 
@@ -110,4 +141,8 @@ export interface SidebarState {
   layout: DockLayout | null;
   /** Style Manager sector id -> open. */
   sectors: Record<string, boolean>;
+  /** Device toolbar: selected device, responsive size, zoom. */
+  devices?: unknown;
+  /** Workspace: grid, sizes, document tabs. */
+  workspace?: unknown;
 }

@@ -19,7 +19,7 @@ export type DropTarget =
   | { kind: 'zone'; zone: ZoneId };
 
 export function emptyZone(): ZoneState {
-  return { size: null, ratio: 0.5, groups: [] };
+  return { size: null, ratio: 0.5, groups: [], collapsed: false };
 }
 
 export function emptyLayout(): DockLayout {
@@ -34,6 +34,7 @@ export function cloneLayout(layout: DockLayout): DockLayout {
       size: z.size,
       ratio: z.ratio,
       groups: z.groups.map((g) => ({ tabs: g.tabs.slice(), active: g.active })),
+      collapsed: !!z.collapsed,
     };
   });
   return out;
@@ -97,6 +98,7 @@ export function normalizeLayout(
     const target = layout[zone];
     if (typeof z.size === 'number' && isFinite(z.size) && z.size > 0) target.size = z.size;
     target.ratio = typeof z.ratio === 'number' && isFinite(z.ratio) ? clamp(z.ratio, minRatio, maxRatio) : 0.5;
+    target.collapsed = z.collapsed === true;
     const groups: unknown[] = Array.isArray(z.groups) ? z.groups : [];
     groups.forEach((g) => {
       const tabsRaw: unknown[] = g && typeof g === 'object' && Array.isArray((g as any).tabs) ? (g as any).tabs : [];
@@ -231,6 +233,15 @@ export function setZoneSize(layout: DockLayout, zone: ZoneId, size: number | nul
   if (layout[zone].size === size) return layout;
   const next = cloneLayout(layout);
   next[zone].size = size;
+  return next;
+}
+
+/** Collapses / expands a zone (`collapsed` undefined = toggle). */
+export function setZoneCollapsed(layout: DockLayout, zone: ZoneId, collapsed?: boolean): DockLayout {
+  const value = collapsed === undefined ? !layout[zone].collapsed : collapsed;
+  if (!!layout[zone].collapsed === value) return layout;
+  const next = cloneLayout(layout);
+  next[zone].collapsed = value;
   return next;
 }
 
