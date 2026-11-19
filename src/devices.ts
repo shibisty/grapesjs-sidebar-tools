@@ -235,7 +235,12 @@ export function createDeviceBar(opts: DeviceBarOptions): DeviceBar {
   function canvasBox() {
     const c: HTMLElement | null = ed.Canvas?.getElement?.() || root.querySelector('.gjs-cv-canvas');
     const r = c?.getBoundingClientRect();
-    return { width: r?.width || 0, height: r?.height || 0 };
+    // Overlays inside the canvas (grapesjs-ruler) may move the frames area in
+    // from the top/left; what is left is the room the frame actually has.
+    const f = c?.querySelector('.gjs-cv-canvas__frames') as HTMLElement | null;
+    const dx = f?.offsetLeft || 0;
+    const dy = f?.offsetTop || 0;
+    return { width: Math.max(0, (r?.width || 0) - dx), height: Math.max(0, (r?.height || 0) - dy) };
   }
 
   // ---- Responsive device ---------------------------------------------------
@@ -485,10 +490,14 @@ export function createDeviceBar(opts: DeviceBarOptions): DeviceBar {
   ed.on('change:device device:select', onDevice);
   const onDevicesChanged = () => fillDevices();
   ed.on('device:add device:remove', onDevicesChanged);
+  // grapesjs-ruler shows/hides its rulers: the room for the frame changed.
+  const onInset = () => applyZoom();
+  ed.on('ruler:toggle', onInset);
   offs.push(() => {
     ed.off('canvas:frame:load', onFrameLoad);
     ed.off('change:device device:select', onDevice);
     ed.off('device:add device:remove', onDevicesChanged);
+    ed.off('ruler:toggle', onInset);
     wheelTargets.forEach((t) => t.removeEventListener('wheel', onWheel as EventListener));
     wheelTargets.clear();
   });

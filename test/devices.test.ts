@@ -174,6 +174,26 @@ describe('device toolbar', () => {
     expect(root(editor).classList.contains('gjs-st-zoomed')).toBe(false);
   });
 
+  it('fit leaves out a frames area moved in by an overlay (grapesjs-ruler) and refits on ruler:toggle', async () => {
+    editor = await createEditor({}, [], DEVICES);
+    const canvas = editor.Canvas.getElement() as HTMLElement;
+    const frames = canvas.querySelector('.gjs-cv-canvas__frames') as HTMLElement;
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 788, height: 600, right: 788, bottom: 600, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    let inset = 0;
+    Object.defineProperty(frames, 'offsetLeft', { configurable: true, get: () => inset });
+    Object.defineProperty(frames, 'offsetTop', { configurable: true, get: () => inset });
+    devBtn(editor, 'tablet').click(); // 768px wide
+    editor.runCommand('sidebar-tools:zoom', { value: 'fit' });
+    expect(editor.Canvas.getZoom()).toBe(100);
+    inset = 20; // rulers shown: 768px of room left
+    editor.trigger('ruler:toggle', { visible: true });
+    expect(editor.Canvas.getZoom()).toBe(100);
+    inset = 40;
+    editor.trigger('ruler:toggle', { visible: true });
+    expect(editor.Canvas.getZoom()).toBe(97); // floor(748 / 768 * 100)
+    await flush(350);
+  });
+
   it('remembers device, responsive size and zoom', async () => {
     editor = await createEditor({}, [], DEVICES);
     devBtn(editor, 'tablet').click();
