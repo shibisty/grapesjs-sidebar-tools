@@ -1,11 +1,13 @@
 {
   "name": "grapesjs-sidebar-tools",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "GrapesJS plugin: dockable tool panels and a device toolbar with zoom — drag Styles, Settings, Layers, Blocks (and other plugins' views) into left, right and bottom zones around the canvas; side zones split in two; sizes and layout remembered.",
   "type": "module",
   "main": "./dist/grapesjs-sidebar-tools.umd.cjs",
   "module": "./dist/grapesjs-sidebar-tools.js",
   "types": "./dist/index.d.ts",
+  "unpkg": "./dist/grapesjs-sidebar-tools.umd.js",
+  "jsdelivr": "./dist/grapesjs-sidebar-tools.umd.js",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -21,7 +23,7 @@
   "sideEffects": false,
   "scripts": {
     "dev": "vite",
-    "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly",
+    "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly && node -e \"require('fs').copyFileSync('dist/grapesjs-sidebar-tools.umd.cjs','dist/grapesjs-sidebar-tools.umd.js')\"",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
