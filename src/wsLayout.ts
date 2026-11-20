@@ -34,6 +34,8 @@ export interface WsLayout {
   groups: WsGroup[];
   /** The group documents open into by default (the last one used). */
   focus: number;
+  /** Pinned documents: first in their group, not closed by "close others / left / right". */
+  pinned: string[];
 }
 
 const MIN_FRACTION = 0.1;
@@ -43,7 +45,7 @@ export function equalCols(n: number): number[] {
 }
 
 export function emptyWsLayout(): WsLayout {
-  return { grid: '1', cols: [1], row: 0.5, groups: [{ tabs: [], active: null }], focus: 0 };
+  return { grid: '1', cols: [1], row: 0.5, groups: [{ tabs: [], active: null }], focus: 0, pinned: [] };
 }
 
 export function cloneWs(l: WsLayout): WsLayout {
@@ -53,7 +55,36 @@ export function cloneWs(l: WsLayout): WsLayout {
     row: l.row,
     groups: l.groups.map((g) => ({ tabs: g.tabs.slice(), active: g.active })),
     focus: l.focus,
+    pinned: (l.pinned || []).slice(),
   };
+}
+
+/** Pinned tabs first in every group (stable: the order inside both parts stays). */
+function orderPinned(l: WsLayout): WsLayout {
+  const pinned = l.pinned || [];
+  if (!pinned.length) return l;
+  l.groups.forEach((g) => {
+    g.tabs = [...g.tabs.filter((t) => pinned.includes(t)), ...g.tabs.filter((t) => !pinned.includes(t))];
+  });
+  return l;
+}
+
+export const isPinned = (l: WsLayout, id: string): boolean => (l.pinned || []).includes(id);
+
+/**
+ * Pins / unpins a document. A pinned tab goes to the end of the pinned
+ * tabs of its group; an unpinned one right after them.
+ */
+export function setPinned(l: WsLayout, id: string, on: boolean): WsLayout {
+  const loc = findDoc(l, id);
+  if (!loc || isPinned(l, id) === on) return l;
+  const next = cloneWs(l);
+  const tabs = next.groups[loc.group].tabs;
+  tabs.splice(loc.index, 1);
+  const pinnedBefore = tabs.filter((t) => next.pinned.includes(t)).length;
+  tabs.splice(pinnedBefore, 0, id);
+  next.pinned = on ? [...next.pinned, id] : next.pinned.filter((t) => t !== id);
+  return orderPinned(next);
 }
 
 function validCols(raw: unknown, n: number): number[] {
@@ -86,7 +117,8 @@ export function normalizeWs(raw: unknown): WsLayout {
   // Extra stored groups (grid shrank by hand-editing): their tabs go to the last group.
   groups.slice(n).forEach((g) => l.groups[n - 1].tabs.push(...g.tabs));
   l.focus = typeof r.focus === 'number' && r.focus >= 0 && r.focus < n ? Math.floor(r.focus) : 0;
-  return l;
+  l.pinned = (Array.isArray(r.pinned) ? r.pinned : []).filter((id: unknown, i: number, a: unknown[]): id is string => typeof id === 'string' && seen.has(id) && a.indexOf(id) === i);
+  return orderPinned(l);
 }
 
 export function findDoc(l: WsLayout, id: string): { group: number; index: number } | null {
@@ -113,7 +145,7 @@ export function setGrid(l: WsLayout, grid: WsGrid): WsLayout {
   }
   while (next.groups.length < n) next.groups.push({ tabs: [], active: null });
   if (next.focus >= n) next.focus = n - 1;
-  return next;
+  return orderPinned(next);
 }
 
 /**
@@ -136,6 +168,7 @@ export function removeDoc(l: WsLayout, id: string, isOpen: (id: string) => boole
   const next = cloneWs(l);
   const g = next.groups[loc.group];
   g.tabs.splice(loc.index, 1);
+  next.pinned = next.pinned.filter((t) => t !== id);
   if (g.active === id) {
     const open = g.tabs.filter(isOpen);
     // the tab after the closed one, else the one before
@@ -177,7 +210,7 @@ export function moveDoc(l: WsLayout, id: string, group: number, index: number, t
     tabs.splice(at, 0, id);
     next.groups[group].active = id;
     next.focus = group;
-    return next;
+    return orderPinned(next);
   }
   const next = cloneWs(l);
   // Where to insert: count the tabs before `index` that stay in the target group.
@@ -197,7 +230,7 @@ export function moveDoc(l: WsLayout, id: string, group: number, index: number, t
   target.tabs.splice(before, 0, ...ordered);
   target.active = id;
   next.focus = group;
-  return next;
+  return orderPinned(next);
 }
 
 export function setCols(l: WsLayout, cols: number[]): WsLayout {
@@ -220,5 +253,6 @@ export function pruneWs(l: WsLayout, isOpen: (id: string) => boolean): WsLayout 
     g.tabs = g.tabs.filter(isOpen);
     if (g.active && !g.tabs.includes(g.active)) g.active = g.tabs[0] ?? null;
   });
+  next.pinned = next.pinned.filter(isOpen);
   return next;
 }

@@ -47,6 +47,8 @@ Between the zones, under the top bar, there is a **tab bar of documents**. Out o
 
 Tabs are switched by a click (or `Enter`), closed by `×`, a middle click or `Delete`, reordered and moved between areas by dragging.
 
+A right click on a tab (or `Shift+F10` / the context-menu key) opens its menu: **Pin / Unpin**, **Close**, **Close others**, **Close tabs to the left**, **Close tabs to the right** (all within the tab's area). Pinned tabs stay first in their area, show a pin instead of `×` (click it to unpin) and are kept by "close others / left / right"; they are remembered with the layout. When those commands close the page in the canvas, the page that is shown then is loaded once.
+
 The **layout button** (at the right end of the tab bar) splits the workspace into one area, two columns, two rows, three columns or 2 × 2 — handy on 4K screens: e.g. the page in one area and its script graph next to it. Areas are resized by the bars between them (double-click: equal sizes). There is one GrapesJS canvas, so all canvas documents (pages) live in the same area; the canvas follows that area when it is moved or resized. The grid, sizes and open tabs are remembered and restored after a reload.
 
 `workspace: false` turns the tab bar off (the canvas takes the whole space between the zones, like in 2.1).
@@ -76,7 +78,10 @@ editor.SidebarTools?.onReady((ws) => {
 | `open(doc, { activate = true, notify = true, group })` | Open a tab (or show it when it is open). `notify: false` — don't call `onActivate` (the canvas already shows it). |
 | `update(id, { title, icon, tooltip, dirty, closable })` | Change a tab. `dirty` marks unsaved changes. |
 | `activate(id, { notify })` / `close(id, { force, notify })` | Show / close a tab. `close` returns whether it closed. |
-| `has(id)` / `list()` / `canvasDoc()` | Open tabs, `[{ id, kind, title, group, active }]`, the canvas document now in the canvas. |
+| `closeMany(id, 'others' \| 'left' \| 'right')` | Close the other tabs / the tabs before / after `id` in its area (pinned and non-closable tabs stay). Returns the closed ids. |
+| `pin(id, on?)` / `isPinned(id)` | Pin / unpin a tab (`on` omitted: toggle). |
+| `openTabMenu(id, { x, y }?)` | Open the tab's context menu (at the point, else under the tab). |
+| `has(id)` / `list()` / `canvasDoc()` | Open tabs, `[{ id, kind, title, group, active, pinned }]`, the canvas document now in the canvas. |
 | `remembered(prefix)` | Ids with this prefix that were open before the reload and are not open yet — open them again to restore the tabs. |
 | `getGrid()` / `setGrid('1' \| '2h' \| '2v' \| '3h' \| '4')` | The split of the workspace. |
 
@@ -160,7 +165,7 @@ grapesjs.init({
 
 The `sidebar-tools:layout` event fires with `{ layout, reason }` after every change made by the user (`reason`: `move`, `activate`, `size`, `ratio`, `collapse`, `set`).
 
-`sidebar-tools:ready` fires once with `{ workspace }` when the workspace exists; `sidebar-tools:workspace` fires with `{ type: 'open' | 'close' | 'activate' | 'layout', id? }` on workspace changes.
+`sidebar-tools:ready` fires once with `{ workspace }` when the workspace exists; `sidebar-tools:workspace` fires with `{ type: 'open' | 'close' | 'activate' | 'layout' | 'pin' | 'unpin', id? }` on workspace changes.
 
 ## Views from other plugins
 
@@ -203,6 +208,8 @@ or fix them for every language with the `labels` option (it always wins over the
 | `sidebarTools.auto` | auto (placeholder of an empty height) |
 | `sidebarTools.canvas` | Canvas (title of the canvas tab when there is no page name) |
 | `sidebarTools.closeTab` | Close |
+| `sidebarTools.pinTab` / `unpinTab` | Pin / Unpin |
+| `sidebarTools.closeOthers` / `closeLeft` / `closeRight` | Close others / Close tabs to the left / Close tabs to the right |
 | `sidebarTools.splitLayout` | Split the workspace |
 | `sidebarTools.layoutSingle` / `layoutColumns2` / `layoutRows2` / `layoutColumns3` / `layoutGrid4` | One area / Two columns / Two rows / Three columns / Four areas (2 × 2) |
 

@@ -36,6 +36,12 @@ export interface SidebarToolsMessages {
   canvas: string;
   /** Close button of a document tab. */
   closeTab: string;
+  /** The context menu of a document tab (right click). */
+  pinTab: string;
+  unpinTab: string;
+  closeOthers: string;
+  closeLeft: string;
+  closeRight: string;
   /** The workspace layout menu and its entries. */
   splitLayout: string;
   layoutSingle: string;

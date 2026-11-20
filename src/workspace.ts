@@ -20,11 +20,13 @@ import {
   addDoc,
   findDoc,
   GRID_SHAPE,
+  isPinned,
   moveDoc,
   pruneWs,
   removeDoc,
   setCols,
   setGrid,
+  setPinned,
   setRow,
   WS_GRIDS,
   type WsGrid,
@@ -79,6 +81,7 @@ export interface WorkspaceDocInfo {
   group: number;
   /** Visible in its group. */
   active: boolean;
+  pinned: boolean;
 }
 
 /** `editor.SidebarTools.workspace` */
@@ -92,6 +95,17 @@ export interface WorkspaceApi {
    * (`onActivate`) unless `notify: false` (the owner loads something itself).
    */
   close(id: string, opts?: { force?: boolean; notify?: boolean }): boolean;
+  /**
+   * Closes the tabs of `id`'s group: `others` — all but `id`, `left` / `right` —
+   * those before / after it. Pinned tabs and tabs that can't close stay.
+   * Returns the ids that closed.
+   */
+  closeMany(id: string, which: 'others' | 'left' | 'right'): string[];
+  /** Pins (`on` default: toggles) a tab: first in its group, kept by "close others / left / right". */
+  pin(id: string, on?: boolean): void;
+  isPinned(id: string): boolean;
+  /** Opens the tab menu of `id` (as on a right click); at the tab when no point is given. */
+  openTabMenu(id: string, at?: { x: number; y: number }): void;
   has(id: string): boolean;
   list(): WorkspaceDocInfo[];
   /** Ids from the stored layout starting with `prefix` that are not open yet (to restore tabs after a reload). */
@@ -118,7 +132,7 @@ export interface WorkspaceOptions {
   /** The canvas moved / was resized (refresh GrapesJS offsets, re-fit the zoom). */
   onCanvasRect(): void;
   /** Something happened (open / close / activate / layout) — for the editor event. */
-  onEvent(type: 'open' | 'close' | 'activate' | 'layout', id?: string): void;
+  onEvent(type: 'open' | 'close' | 'activate' | 'layout' | 'pin' | 'unpin', id?: string): void;
 }
 
 export interface Workspace {
@@ -131,6 +145,13 @@ export interface Workspace {
 }
 
 const ICONS = {
+  pin: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z"/></svg>',
+  unpin:
+    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M2,5.27L3.28,4L20,20.72L18.73,22L12.8,16.07V22H11.2V16H6V14L8,12V11.27L2,5.27M16,12L18,14V16H17.82L8,6.18V4H7V2H17V4H16V12Z"/></svg>',
+  closeOthers:
+    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4,4H20V20H4V4M6,8V18H18V8H6Z"/></svg>',
+  closeLeft: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg>',
+  closeRight: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4,11V13H16L10.5,18.5L11.92,19.92L19.84,12L11.92,4.08L10.5,5.5L16,11H4Z"/></svg>',
   close:
     '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg>',
   canvas:
@@ -235,8 +256,14 @@ export function createWorkspace(opts: WorkspaceOptions): Workspace {
 
   // ---- Rendering ---------------------------------------------------------------------
 
+  /** The tab can be closed by the user (not counting `onClose`). */
+  function canClose(doc: Doc): boolean {
+    return doc.closable !== false && !(doc.kind === 'canvas' && canvasIds().length <= 1);
+  }
+
   function renderTab(doc: Doc, active: boolean): HTMLElement {
-    const tab = el('div', `gjs-st-wtab${active ? ' gjs-st-wtab--active gjs-four-color' : ''}${doc.dirty ? ' gjs-st-wtab--dirty' : ''}`);
+    const pinned = isPinned(layout, doc.id);
+    const tab = el('div', `gjs-st-wtab${active ? ' gjs-st-wtab--active gjs-four-color' : ''}${doc.dirty ? ' gjs-st-wtab--dirty' : ''}${pinned ? ' gjs-st-wtab--pinned' : ''}`);
     tab.setAttribute('data-doc', doc.id);
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-selected', String(active));
@@ -250,7 +277,15 @@ export function createWorkspace(opts: WorkspaceOptions): Workspace {
     const title = el('span', 'gjs-st-wtab__title');
     title.textContent = doc.title;
     tab.appendChild(title);
-    if (doc.closable !== false && !(doc.kind === 'canvas' && canvasIds().length <= 1)) {
+    if (pinned) {
+      // A pinned tab shows the pin instead of the close button (click: unpin).
+      const pin = el('span', 'gjs-st-wtab__pin');
+      pin.innerHTML = ICONS.pin;
+      pin.setAttribute('role', 'button');
+      pin.setAttribute('data-unpin', doc.id);
+      pin.title = opts.getLabels().unpinTab;
+      tab.appendChild(pin);
+    } else if (canClose(doc)) {
       const close = el('span', 'gjs-st-wtab__close');
       close.innerHTML = ICONS.close;
       close.setAttribute('role', 'button');
@@ -548,6 +583,47 @@ export function createWorkspace(opts: WorkspaceOptions): Workspace {
     return true;
   }
 
+  /** The open tabs of `id`'s group that `which` would close. */
+  function targetsOf(id: string, which: 'others' | 'left' | 'right'): string[] {
+    const loc = findDoc(layout, id);
+    if (!loc) return [];
+    const tabs = layout.groups[loc.group].tabs;
+    const i = tabs.indexOf(id);
+    const part = which === 'left' ? tabs.slice(0, i) : which === 'right' ? tabs.slice(i + 1) : tabs.filter((t) => t !== id);
+    return part.filter((t) => docs.has(t) && !isPinned(layout, t) && docs.get(t)!.closable !== false);
+  }
+
+  function closeMany(id: string, which: 'others' | 'left' | 'right'): string[] {
+    if (destroyed || !docs.has(id)) return [];
+    const before = currentCanvas;
+    const done: string[] = [];
+    // One canvas load at the end, not one per closed page.
+    targetsOf(id, which).forEach((t) => {
+      if (close(t, { notify: false })) done.push(t);
+    });
+    if (which === 'others' && done.length) activate(id, false);
+    if (currentCanvas && currentCanvas !== before) {
+      try {
+        docs.get(currentCanvas)?.onActivate?.();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(`[grapesjs-sidebar-tools] document "${currentCanvas}" failed to open`, err);
+      }
+    }
+    return done;
+  }
+
+  function pin(id: string, on?: boolean) {
+    if (destroyed || !docs.has(id)) return;
+    const want = on ?? !isPinned(layout, id);
+    const next = setPinned(layout, id, want);
+    if (next === layout) return;
+    layout = next;
+    render();
+    save();
+    opts.onEvent(want ? 'pin' : 'unpin', id);
+  }
+
   function moveTo(id: string, group: number, index: number) {
     const next = moveDoc(layout, id, group, index, canvasIds());
     if (next === layout) return;
@@ -670,7 +746,7 @@ export function createWorkspace(opts: WorkspaceOptions): Workspace {
 
   function onPointerDown(e: PointerEvent) {
     const target = e.target as HTMLElement;
-    if (target.closest?.('[data-close]') || target.closest?.('[data-layout-menu]')) return;
+    if (target.closest?.('[data-close]') || target.closest?.('[data-unpin]') || target.closest?.('[data-layout-menu]')) return;
     const tab = target.closest?.('.gjs-st-wtab') as HTMLElement | null;
     if (!tab || !ws.contains(tab) || drag) return;
     if (e.button === 1) {
@@ -696,11 +772,26 @@ export function createWorkspace(opts: WorkspaceOptions): Workspace {
       close(closeBtn.getAttribute('data-close')!);
       return;
     }
+    const unpinBtn = target.closest?.('[data-unpin]');
+    if (unpinBtn && ws.contains(unpinBtn)) {
+      e.preventDefault();
+      pin(unpinBtn.getAttribute('data-unpin')!, false);
+      return;
+    }
     const layoutBtn = target.closest?.('[data-layout-menu]') as HTMLElement | null;
     if (layoutBtn && ws.contains(layoutBtn)) {
       e.preventDefault();
       toggleMenu(layoutBtn);
     }
+  }
+
+  function onContextMenu(e: MouseEvent) {
+    const tab = (e.target as HTMLElement).closest?.('.gjs-st-wtab') as HTMLElement | null;
+    if (!tab || !ws.contains(tab)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (drag) endDrag(false);
+    openTabMenu(tab.getAttribute('data-doc')!, { x: e.clientX, y: e.clientY });
   }
 
   function onKeyDown(e: KeyboardEvent) {
@@ -719,12 +810,16 @@ export function createWorkspace(opts: WorkspaceOptions): Workspace {
     } else if (e.key === 'Delete') {
       e.preventDefault();
       close(tab.getAttribute('data-doc')!);
+    } else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      e.preventDefault();
+      openTabMenu(tab.getAttribute('data-doc')!);
     }
   }
 
   ws.addEventListener('pointerdown', onPointerDown);
   ws.addEventListener('click', onClick);
   ws.addEventListener('keydown', onKeyDown);
+  ws.addEventListener('contextmenu', onContextMenu);
 
   // ---- Layout menu ------------------------------------------------------------------------
 
@@ -732,13 +827,95 @@ export function createWorkspace(opts: WorkspaceOptions): Workspace {
     menu?.remove();
     menu = null;
     document.removeEventListener('pointerdown', onOutside, true);
+    window.removeEventListener('blur', closeMenu);
   }
   const onOutside = (e: Event) => {
     if (menu && !menu.contains(e.target as Node) && !(e.target as HTMLElement).closest?.('[data-layout-menu]')) closeMenu();
   };
 
+  /** Up / Down / Home / End move between the enabled items of the open menu. */
+  function menuKeys(e: KeyboardEvent) {
+    if (!menu || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+    const items = Array.from(menu.querySelectorAll<HTMLButtonElement>('button:not([disabled])'));
+    if (!items.length) return;
+    e.preventDefault();
+    const i = items.indexOf(document.activeElement as HTMLButtonElement);
+    const n = items.length;
+    const j = e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : e.key === 'ArrowDown' ? (i + 1) % n : (i - 1 + n) % n;
+    items[j].focus();
+  }
+
+  /** The context menu of a tab: pin, close this / others / to the left / to the right. */
+  function openTabMenu(id: string, at?: { x: number; y: number }) {
+    if (destroyed) return;
+    const doc = docs.get(id);
+    if (!doc) return;
+    closeMenu();
+    const labels = opts.getLabels();
+    const pinned = isPinned(layout, id);
+    const tabEl = Array.from(ws.querySelectorAll<HTMLElement>('.gjs-st-wtab')).find((t) => t.getAttribute('data-doc') === id) || null;
+    menu = el('div', 'gjs-st-wsmenu gjs-st-tabmenu gjs-one-bg gjs-two-color');
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('data-tab-menu', id);
+    const item = (key: string, icon: string, text: string, enabled: boolean, run: () => void) => {
+      const b = el('button', 'gjs-st-wsmenu__item');
+      b.type = 'button';
+      b.setAttribute('role', 'menuitem');
+      b.setAttribute('data-action', key);
+      b.disabled = !enabled;
+      b.innerHTML = icon;
+      const span = el('span', '');
+      span.textContent = text;
+      b.appendChild(span);
+      b.addEventListener('click', () => {
+        closeMenu();
+        run();
+      });
+      menu!.appendChild(b);
+    };
+    const sep = () => {
+      const hr = el('div', 'gjs-st-wsmenu__sep');
+      hr.setAttribute('role', 'separator');
+      menu!.appendChild(hr);
+    };
+    item(pinned ? 'unpin' : 'pin', pinned ? ICONS.unpin : ICONS.pin, pinned ? labels.unpinTab : labels.pinTab, true, () => pin(id, !pinned));
+    sep();
+    item('close', ICONS.close, labels.closeTab, canClose(doc), () => close(id));
+    item('close-others', ICONS.closeOthers, labels.closeOthers, targetsOf(id, 'others').length > 0, () => closeMany(id, 'others'));
+    item('close-left', ICONS.closeLeft, labels.closeLeft, targetsOf(id, 'left').length > 0, () => closeMany(id, 'left'));
+    item('close-right', ICONS.closeRight, labels.closeRight, targetsOf(id, 'right').length > 0, () => closeMany(id, 'right'));
+    root.appendChild(menu);
+    // Position: at the pointer (or under the tab), kept inside the editor.
+    const rr = root.getBoundingClientRect();
+    const tr = tabEl?.getBoundingClientRect();
+    const px = at ? at.x : tr ? tr.left : rr.left;
+    const py = at ? at.y : tr ? tr.bottom + 2 : rr.top;
+    const mw = menu.offsetWidth || 200;
+    const mh = menu.offsetHeight || 170;
+    const x = Math.max(0, Math.min(px - rr.left, rr.width - mw - 2));
+    const y = Math.max(0, Math.min(py - rr.top, rr.height - mh - 2));
+    menu.style.left = `${Math.round(x)}px`;
+    menu.style.top = `${Math.round(y)}px`;
+    (menu.querySelector('button:not([disabled])') as HTMLElement | null)?.focus();
+    menu.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' || e.key === 'Tab') {
+        e.preventDefault();
+        closeMenu();
+        const back = Array.from(ws.querySelectorAll<HTMLElement>('.gjs-st-wtab')).find((t) => t.getAttribute('data-doc') === id);
+        back?.focus();
+      } else menuKeys(e);
+    });
+    menu.addEventListener('contextmenu', (e) => e.preventDefault());
+    document.addEventListener('pointerdown', onOutside, true);
+    window.addEventListener('blur', closeMenu);
+  }
+
   function toggleMenu(anchor: HTMLElement) {
-    if (menu) return closeMenu();
+    if (menu) {
+      const wasTabMenu = menu.hasAttribute('data-tab-menu');
+      closeMenu();
+      if (!wasTabMenu) return;
+    }
     const labels = opts.getLabels();
     menu = el('div', 'gjs-st-wsmenu gjs-one-bg gjs-two-color');
     menu.setAttribute('role', 'menu');
@@ -769,7 +946,7 @@ export function createWorkspace(opts: WorkspaceOptions): Workspace {
       if (e.key === 'Escape') {
         closeMenu();
         anchor.focus();
-      }
+      } else menuKeys(e);
     });
     document.addEventListener('pointerdown', onOutside, true);
   }
@@ -863,11 +1040,15 @@ export function createWorkspace(opts: WorkspaceOptions): Workspace {
     },
     activate: (id, o = {}) => activate(id, o.notify !== false),
     close,
+    closeMany,
+    pin,
+    isPinned: (id) => isPinned(layout, id),
+    openTabMenu,
     has: isOpen,
     list: () =>
       Array.from(docs.values()).map((d) => {
         const loc = findDoc(layout, d.id);
-        return { id: d.id, kind: d.kind, title: d.title, group: loc?.group ?? 0, active: !!loc && shown(loc.group) === d.id };
+        return { id: d.id, kind: d.kind, title: d.title, group: loc?.group ?? 0, active: !!loc && shown(loc.group) === d.id, pinned: isPinned(layout, d.id) };
       }),
     remembered: (prefix) => layout.groups.flatMap((g) => g.tabs).filter((id) => id.startsWith(prefix) && !docs.has(id)),
     canvasDoc: () => currentCanvas,
@@ -900,6 +1081,7 @@ export function createWorkspace(opts: WorkspaceOptions): Workspace {
       ws.removeEventListener('pointerdown', onPointerDown);
       ws.removeEventListener('click', onClick);
       ws.removeEventListener('keydown', onKeyDown);
+      ws.removeEventListener('contextmenu', onContextMenu);
       docs.forEach((d) => {
         try {
           d.onClosed?.();

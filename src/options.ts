@@ -123,7 +123,7 @@ export function resolveOptions(opts?: SidebarToolsOptions | null): ResolvedOptio
 
 export const PLUGIN_ID = 'grapesjs-sidebar-tools';
 /** Version of this package (a test checks it against package.json). */
-export const VERSION = '2.4.0';
+export const VERSION = '2.5.0';
 
 /** Options for forms (plugin contract). Changes apply after a reload. */
 export const META: PluginMeta = {

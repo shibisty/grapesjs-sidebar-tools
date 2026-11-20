@@ -5,12 +5,14 @@ import {
   emptyWsLayout,
   findDoc,
   groupCount,
+  isPinned,
   moveDoc,
   normalizeWs,
   pruneWs,
   removeDoc,
   setCols,
   setGrid,
+  setPinned,
   setRow,
   type WsLayout,
 } from '../src/wsLayout';
@@ -139,5 +141,32 @@ describe('sizes and prune', () => {
     expect(tabs(pruned)).toEqual(['a*,b']);
     expect(pruneWs(l, () => true)).toBe(l);
     expect(findDoc(pruned, 'gone')).toBeNull();
+  });
+});
+
+describe('pinned tabs', () => {
+  it('pinning moves a tab to the end of the pinned ones; unpinning right after them', () => {
+    let l = make([['a', 'b', 'c', 'd']]);
+    l = setPinned(l, 'c', true);
+    expect(l.groups[0].tabs).toEqual(['c', 'a', 'b', 'd']);
+    l = setPinned(l, 'd', true);
+    expect(l.groups[0].tabs).toEqual(['c', 'd', 'a', 'b']);
+    expect(isPinned(l, 'd')).toBe(true);
+    expect(setPinned(l, 'd', true)).toBe(l);
+    l = setPinned(l, 'c', false);
+    expect(l.groups[0].tabs).toEqual(['d', 'c', 'a', 'b']);
+    expect(l.pinned).toEqual(['d']);
+  });
+
+  it('stay first after moves, survive normalize, go away with the tab', () => {
+    let l = setPinned(make([['a', 'b'], ['c']]), 'a', true);
+    l = moveDoc(l, 'b', 0, 0); // dropped before the pinned tab
+    expect(l.groups[0].tabs).toEqual(['a', 'b']);
+    l = moveDoc(l, 'c', 0, 0);
+    expect(l.groups[0].tabs).toEqual(['a', 'c', 'b']);
+    const again = normalizeWs(JSON.parse(JSON.stringify({ ...l, pinned: ['a', 'zzz', 'a', 5] })));
+    expect(again.pinned).toEqual(['a']);
+    expect(removeDoc(l, 'a').pinned).toEqual([]);
+    expect(pruneWs(l, (id) => id !== 'a').pinned).toEqual([]);
   });
 });

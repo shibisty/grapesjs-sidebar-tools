@@ -227,6 +227,79 @@ describe('workspace', () => {
     expect(w.remembered('bp:')).toEqual([]);
   });
 
+  it('tab context menu: pin, close this / others / left / right', async () => {
+    editor = await createEditor();
+    const loads: string[] = [];
+    const w = ws(editor);
+    ['a', 'b', 'c', 'd', 'e'].forEach((id) => w.open(canvasDoc(`page:${id}`, { onActivate: () => loads.push(id) }), { notify: false }));
+    w.activate('page:c');
+    loads.length = 0;
+    const menuOf = () => root(editor!).querySelector<HTMLElement>('.gjs-st-tabmenu');
+    const action = (key: string) => menuOf()!.querySelector<HTMLButtonElement>(`[data-action="${key}"]`)!;
+    const rightClick = (id: string) => wtab(editor!, id).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 50, clientY: 10 }));
+
+    // pin b: it goes first and shows the pin instead of ×
+    rightClick('page:b');
+    expect(menuOf()).toBeTruthy();
+    expect(Array.from(menuOf()!.querySelectorAll('button')).map((x) => x.dataset.action)).toEqual(['pin', 'close', 'close-others', 'close-left', 'close-right']);
+    action('pin').click();
+    expect(menuOf()).toBeNull();
+    expect(wsTabs(editor)).toEqual([['page:b', 'page:a', 'page:c*', 'page:d', 'page:e']]);
+    expect(wtab(editor, 'page:b').classList.contains('gjs-st-wtab--pinned')).toBe(true);
+    expect(wtab(editor, 'page:b').querySelector('[data-close]')).toBeNull();
+    expect(w.isPinned('page:b')).toBe(true);
+
+    // close to the right of d: e
+    rightClick('page:d');
+    action('close-right').click();
+    expect(wsTabs(editor)).toEqual([['page:b', 'page:a', 'page:c*', 'page:d']]);
+    // close to the left of c: a (b is pinned)
+    rightClick('page:c');
+    expect(action('close-left').disabled).toBe(false);
+    action('close-left').click();
+    expect(wsTabs(editor)).toEqual([['page:b', 'page:c*', 'page:d']]);
+    expect(loads).toEqual([]);
+    // close others from d (not shown): c goes, d is shown and loaded once
+    rightClick('page:d');
+    action('close-others').click();
+    expect(wsTabs(editor)).toEqual([['page:b', 'page:d*']]);
+    expect(loads).toEqual(['d']);
+    // nothing left to close around d
+    rightClick('page:d');
+    expect(action('close-others').disabled).toBe(true);
+    expect(action('close-right').disabled).toBe(true);
+    // close this
+    action('close').click();
+    expect(wsTabs(editor)).toEqual([['page:b*']]);
+    // the pinned tab is stored, unpinned by its pin button
+    await flush(5);
+    expect(stored().workspace.pinned).toEqual(['page:b']);
+    w.open(canvasDoc('page:f'), { notify: false });
+    (wtab(editor, 'page:b').querySelector('[data-unpin]') as HTMLElement).click();
+    expect(w.isPinned('page:b')).toBe(false);
+    expect(wtab(editor, 'page:b').querySelector('[data-close]')).toBeTruthy();
+  });
+
+  it('tab menu: keyboard, Escape and outside clicks close it', async () => {
+    editor = await createEditor();
+    const w = ws(editor);
+    w.open({ id: 'x', title: 'X' });
+    w.open({ id: 'y', title: 'Y' });
+    wtab(editor, 'x').dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true }));
+    const menu = root(editor).querySelector<HTMLElement>('.gjs-st-tabmenu')!;
+    expect(menu).toBeTruthy();
+    expect((document.activeElement as HTMLElement).dataset.action).toBe('pin');
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect((document.activeElement as HTMLElement).dataset.action).toBe('close');
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root(editor).querySelector('.gjs-st-tabmenu')).toBeNull();
+    w.openTabMenu('y');
+    expect(root(editor).querySelector('.gjs-st-tabmenu')).toBeTruthy();
+    document.body.dispatchEvent(ptr('pointerdown', {}));
+    expect(root(editor).querySelector('.gjs-st-tabmenu')).toBeNull();
+    expect(w.closeMany('y', 'others')).toEqual(['x']);
+  });
+
   it('destroy removes the workspace and closes documents', async () => {
     editor = await createEditor();
     const onClosed = vi.fn();
