@@ -259,9 +259,32 @@ export function createViewController(editor: Editor, opts: ViewControllerOptions
     }
   }
 
+  /**
+   * Run/stop of one view more often than any user could: another plugin
+   * fights over the button state (re-activates it whenever it is reset).
+   * Stop reacting to that view for a moment instead of looping forever.
+   */
+  const bursts = new Map<string, { at: number; n: number; warned?: boolean }>();
+  function looping(view: ManagedView): boolean {
+    const now = Date.now();
+    const b = bursts.get(view.id);
+    if (!b || now - b.at > 500) {
+      bursts.set(view.id, { at: now, n: 1, warned: b?.warned });
+      return false;
+    }
+    b.n++;
+    if (b.n <= 20) return false;
+    if (!b.warned) {
+      b.warned = true;
+      // eslint-disable-next-line no-console
+      console.warn(`[grapesjs-sidebar-tools] view "${view.id}" is run and stopped in a loop; another plugin keeps changing its button`);
+    }
+    return true;
+  }
+
   /** Someone ran / activated the view: show its tab, then put the button and command back to "idle". */
   function handleExternalRun(view: ManagedView) {
-    if (destroyed) return;
+    if (destroyed || looping(view)) return;
     opts.onFocus(view.id);
     queueMicrotask(() => {
       if (destroyed || !views.includes(view)) return;
@@ -272,7 +295,7 @@ export function createViewController(editor: Editor, opts: ViewControllerOptions
 
   /** Someone stopped the view (which hid its content): render it again. */
   function handleExternalStop(view: ManagedView) {
-    if (destroyed || rerunDepth > 3) return;
+    if (destroyed || rerunDepth > 3 || looping(view)) return;
     queueMicrotask(() => {
       if (destroyed || !views.includes(view)) return;
       rerunDepth++;
