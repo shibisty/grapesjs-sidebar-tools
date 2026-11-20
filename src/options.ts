@@ -1,3 +1,4 @@
+import type { PluginMeta } from './contract';
 import { DEFAULT_ZOOM_LEVELS } from './devices';
 import type { ResolvedOptions, SidebarToolsOptions, ZoneId } from './types';
 
@@ -118,4 +119,46 @@ export function resolveOptions(opts?: SidebarToolsOptions | null): ResolvedOptio
     workspace: o.workspace !== false,
     labels,
   };
+}
+
+export const PLUGIN_ID = 'grapesjs-sidebar-tools';
+/** Version of this package (a test checks it against package.json). */
+export const VERSION = '2.3.0';
+
+/** Options for forms (plugin contract). Changes apply after a reload. */
+export const META: PluginMeta = {
+  id: PLUGIN_ID,
+  version: VERSION,
+  title: 'Sidebar Tools',
+  description: 'Dockable panels (Styles, Settings, Layers, Blocks…), device bar and zoom, document workspace.',
+  options: [
+    { key: 'workspace', type: 'boolean', default: true, title: 'Document workspace', description: 'Tabs of pages and editors under the top bar.' },
+    { key: 'deviceBar', type: 'boolean', default: true, title: 'Device bar', description: 'Device buttons, size and zoom over the canvas.' },
+    { key: 'hideDevicePanel', type: 'boolean', default: true, title: 'Hide the GrapesJS device select' },
+    { key: 'persist', type: 'boolean', default: true, title: 'Remember the layout' },
+    { key: 'zoomLevels', type: 'json', default: DEFAULT_ZOOM_LEVELS.slice(), title: 'Zoom levels, %' },
+    { key: 'sizes', type: 'json', default: { left: 260, right: null, bottom: 240 }, title: 'Zone sizes, px', description: 'null — the GrapesJS default.' },
+    { key: 'defaultLayout', type: 'json', default: {}, title: 'Initial layout', advanced: true },
+    { key: 'views', type: 'json', default: null, title: 'Dockable views', description: 'Button or command ids; null — all views.', advanced: true },
+    { key: 'panelId', type: 'string', default: '', title: 'Views panel', description: 'Empty — auto.', advanced: true },
+    { key: 'stylesTab', type: 'string', default: 'open-sm', title: 'Styles view', advanced: true },
+    { key: 'settingsTab', type: 'string', default: 'open-tm', title: 'Settings view', advanced: true },
+    { key: 'minSize', type: 'json', default: { side: 180, bottom: 120 }, title: 'Minimal sizes, px', advanced: true },
+    { key: 'minRatio', type: 'number', default: 0.15, title: 'Minimal split ratio', advanced: true },
+    { key: 'maxRatio', type: 'number', default: 0.85, title: 'Maximal split ratio', advanced: true },
+    { key: 'fixDeviceCommands', type: 'boolean', default: true, title: 'Fix preset device commands', advanced: true },
+    { key: 'storageKey', type: 'string', default: 'gjs-sidebar-tools', title: 'localStorage key', advanced: true },
+    { key: 'labels', type: 'json', default: {}, title: 'Texts', advanced: true },
+    { key: 'injectCss', type: 'boolean', default: true, title: 'Inject CSS', advanced: true },
+  ],
+};
+
+/** The options a form can show. */
+export function publicOptions(o: ResolvedOptions): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  (META.options || []).forEach((f) => {
+    const v = (o as unknown as Record<string, unknown>)[f.key];
+    out[f.key] = v === null && f.key === 'panelId' ? '' : JSON.parse(JSON.stringify(v ?? null));
+  });
+  return out;
 }

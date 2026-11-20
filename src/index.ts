@@ -47,4 +47,6 @@ export type { SidebarToolsApi } from './plugin';
 export type { OpenOptions, WorkspaceApi, WorkspaceDocInfo, WorkspaceDocInput } from './workspace';
 export type { WsGrid, WsLayout } from './wsLayout';
 
+// Only the default export: the UMD global stays the plugin function itself
+// (`plugin.meta` holds the id, version and options).
 export default plugin;

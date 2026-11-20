@@ -5,7 +5,8 @@ import { createWorkspace, type Workspace, type WorkspaceApi } from './workspace'
 import { normalizeWs, WS_GRIDS, type WsGrid } from './wsLayout';
 import { getLocale, isRtlLocale, registerI18n, t } from './i18n';
 import { addTabs, findTab, layoutFromDefault, normalizeLayout, removeTabs } from './layout';
-import { resolveOptions } from './options';
+import { META, publicOptions, resolveOptions } from './options';
+import { definePlugin, registerControl } from './contract';
 import { createSectorMemory } from './sectors';
 import { createStateStore } from './state';
 import { injectCss } from './styles';
@@ -67,9 +68,10 @@ function isAlive(editor: Editor): boolean {
   }
 }
 
-export default function grapesjsSidebarTools(editor: Editor, opts: SidebarToolsOptions = {}): void {
+function grapesjsSidebarTools(editor: Editor, opts: SidebarToolsOptions = {}): void {
   const ed = editor as any;
   const options = resolveOptions(opts);
+  const offControl = registerControl(editor, META, () => publicOptions(options), () => undefined);
   registerI18n(editor);
   if (options.injectCss && typeof document !== 'undefined') injectCss(document);
 
@@ -397,6 +399,7 @@ export default function grapesjsSidebarTools(editor: Editor, opts: SidebarToolsO
   function cleanup() {
     if (destroyed) return;
     destroyed = true;
+    offControl();
     if (refreshFrame) {
       if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(refreshFrame);
       clearTimeout(refreshFrame);
@@ -422,3 +425,9 @@ export default function grapesjsSidebarTools(editor: Editor, opts: SidebarToolsO
   else on('load', onLoad);
   on('destroy', cleanup);
 }
+
+definePlugin(grapesjsSidebarTools, META);
+// The UMD global is the function itself; `.default` lets it be used like the others.
+(grapesjsSidebarTools as unknown as { default: unknown }).default = grapesjsSidebarTools;
+
+export default grapesjsSidebarTools;
