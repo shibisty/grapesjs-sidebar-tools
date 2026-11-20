@@ -272,6 +272,23 @@ export function createWorkspace(opts: WorkspaceOptions): Workspace {
 
   function render() {
     if (destroyed) return;
+    // A full render re-attaches the panes: give the focus back afterwards.
+    const focused = document.activeElement as HTMLElement | null;
+    const keep = focused && focused !== document.body && Array.from(docs.values()).some((d) => d.pane?.contains(focused)) ? focused : null;
+    try {
+      renderAll();
+    } finally {
+      if (keep && keep.isConnected && document.activeElement !== keep) {
+        try {
+          keep.focus({ preventScroll: true });
+        } catch {
+          /* not focusable any more */
+        }
+      }
+    }
+  }
+
+  function renderAll() {
     syncDefaultCanvas();
     const labels = opts.getLabels();
     // keep the panes (their content is the documents' state)
@@ -834,8 +851,15 @@ export function createWorkspace(opts: WorkspaceOptions): Workspace {
     update(id, patch) {
       const doc = docs.get(id);
       if (!doc) return;
+      const changed = (Object.keys(patch) as (keyof typeof patch)[]).filter((k) => doc[k] !== patch[k]);
+      if (!changed.length) return;
       Object.assign(doc, patch);
-      render();
+      // Title, icon, tooltip, dirty mark, close button live in the tab only: redraw the
+      // tab in place. A full render re-attaches the panes, which drops the focus (and the
+      // caret) of whatever is being edited in them — e.g. on every autosave of a code editor.
+      const tabs = Array.from(ws.querySelectorAll<HTMLElement>('.gjs-st-wtab')).filter((t) => t.getAttribute('data-doc') === id);
+      if (!tabs.length) return render();
+      tabs.forEach((t) => t.replaceWith(renderTab(doc, t.classList.contains('gjs-st-wtab--active'))));
     },
     activate: (id, o = {}) => activate(id, o.notify !== false),
     close,

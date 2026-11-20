@@ -133,6 +133,26 @@ describe('workspace', () => {
     expect(ws(editor).list().find((d) => d.id === 'x')).toMatchObject({ title: 'Renamed', kind: 'element', active: true });
   });
 
+  it('update keeps the focus in the document (no re-attaching of panes)', async () => {
+    editor = await createEditor();
+    let input: HTMLInputElement | null = null;
+    ws(editor).open({
+      id: 'x',
+      title: 'X',
+      mount: (pane: HTMLElement) => {
+        input = document.createElement('input');
+        pane.appendChild(input);
+      },
+    } as never);
+    await flush(5);
+    input!.focus();
+    expect(document.activeElement).toBe(input);
+    ws(editor).update('x', { title: 'Saved' });
+    ws(editor).update('x', { title: 'Saved' }); // no change: nothing happens
+    expect(document.activeElement).toBe(input);
+    expect(wtab(editor, 'x').textContent).toContain('Saved');
+  });
+
   it('splits into 2–4 groups; the canvas stays in its group', async () => {
     editor = await createEditor();
     const w: WorkspaceApi = ws(editor);
