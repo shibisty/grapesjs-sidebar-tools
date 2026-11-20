@@ -13,6 +13,8 @@ import {
   setZoneCollapsed,
   setZoneRatio,
   setZoneSize,
+  setZoneWidths,
+  zoneWidths,
 } from '../src/layout';
 import type { DockLayout } from '../src/types';
 
@@ -61,13 +63,13 @@ describe('normalizeLayout', () => {
     expect(l.left.ratio).toBe(0.5);
   });
 
-  it('merges groups beyond the zone limit (2 for sides, 1 for bottom)', () => {
+  it('merges groups beyond the zone limit (2 for sides, 3 for bottom)', () => {
     const raw = {
-      bottom: { groups: [{ tabs: ['open-sm'] }, { tabs: ['open-tm'] }] },
+      bottom: { groups: [{ tabs: ['open-sm'] }, { tabs: ['open-tm'] }, { tabs: ['y'] }, { tabs: ['z'] }] },
       left: { groups: [{ tabs: ['open-layers'] }, { tabs: ['open-blocks'] }, { tabs: ['x'] }] },
     };
-    const l = normalizeLayout(raw, [...ALL, 'x']);
-    expect(tabsOf(l).bottom).toEqual(['open-sm,open-tm:open-sm']);
+    const l = normalizeLayout(raw, [...ALL, 'x', 'y', 'z']);
+    expect(tabsOf(l).bottom).toEqual(['open-sm:open-sm', 'open-tm:open-tm', 'y,z:y']);
     expect(tabsOf(l).left).toEqual(['open-layers:open-layers', 'open-blocks,x:open-blocks']);
   });
 
@@ -100,10 +102,36 @@ describe('moveTab', () => {
     expect(tabsOf(l).right).toEqual(['open-sm:open-sm', 'open-tm,open-layers,open-blocks:open-blocks']);
   });
 
-  it('never splits the bottom zone', () => {
-    const l = moveTab(base(), 'open-tm', { kind: 'zone', zone: 'bottom' });
-    expect(moveTab(l, 'open-sm', { kind: 'split', zone: 'bottom', position: 'after' })).toBe(l);
-    expect(isValidTarget(l, { kind: 'split', zone: 'bottom', position: 'after' })).toBe(false);
+  it('splits the bottom zone into up to three groups side by side, next to a given group', () => {
+    let l = moveTab(base(), 'open-tm', { kind: 'zone', zone: 'bottom' });
+    l = moveTab(l, 'open-sm', { kind: 'split', zone: 'bottom', position: 'after', group: 0 });
+    l = moveTab(l, 'open-layers', { kind: 'split', zone: 'bottom', position: 'before', group: 1 });
+    expect(tabsOf(l).bottom).toEqual(['open-tm:open-tm', 'open-layers:open-layers', 'open-sm:open-sm']);
+    expect(isValidTarget(l, { kind: 'split', zone: 'bottom', position: 'after', group: 2 })).toBe(false);
+    // full: the move falls back to the last group
+    l = moveTab(l, 'open-blocks', { kind: 'split', zone: 'bottom', position: 'after', group: 2 });
+    expect(tabsOf(l).bottom[2]).toBe('open-sm,open-blocks:open-blocks');
+  });
+
+  it('a tab moved out of its own group into a split next to it', () => {
+    let l = moveTab(base(), 'open-tm', { kind: 'zone', zone: 'bottom' });
+    l = moveTab(l, 'open-sm', { kind: 'tabs', zone: 'bottom', group: 0, index: 1 });
+    l = moveTab(l, 'open-sm', { kind: 'split', zone: 'bottom', position: 'before', group: 0 });
+    expect(tabsOf(l).bottom).toEqual(['open-sm:open-sm', 'open-tm:open-tm']);
+  });
+
+  it('bottom shares: stored normalized, dropped when groups change or are equal again', () => {
+    let l = moveTab(base(), 'open-tm', { kind: 'zone', zone: 'bottom' });
+    l = moveTab(l, 'open-sm', { kind: 'split', zone: 'bottom', position: 'after', group: 0 });
+    expect(zoneWidths(l.bottom)).toEqual([0.5, 0.5]);
+    l = setZoneWidths(l, 'bottom', [3, 1]);
+    expect(l.bottom.widths).toEqual([0.75, 0.25]);
+    expect(setZoneWidths(l, 'bottom', [0.75, 0.25])).toBe(l);
+    expect(normalizeLayout(JSON.parse(JSON.stringify(l)), ALL).bottom.widths).toEqual([0.75, 0.25]);
+    expect(normalizeLayout({ ...JSON.parse(JSON.stringify(l)), bottom: { ...l.bottom, widths: [1, 2, 3] } }, ALL).bottom.widths).toBeUndefined();
+    const three = moveTab(l, 'open-layers', { kind: 'split', zone: 'bottom', position: 'after', group: 1 });
+    expect(three.bottom.widths).toBeUndefined();
+    expect(setZoneWidths(l, 'bottom', null).bottom.widths).toBeUndefined();
   });
 
   it('inserts into a tab bar at an index and activates the tab', () => {

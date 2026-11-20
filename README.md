@@ -7,16 +7,17 @@ GrapesJS plugin: **dockable tool panels**.
 Every button of the GrapesJS views panel — **Style Manager**, **Settings**, **Layers**, **Blocks**, and the views other plugins add there — becomes a tab you can drag into one of three zones around the canvas:
 
 - **left** and **right** — can be split in two by height (two tab groups one above the other, with a resizer between them);
-- **bottom** — one tab group under the canvas.
+- **bottom** — under the canvas, split into up to three tab groups side by side (as many as fit at 360 px each: two on a laptop, three on a wide or 4K screen).
 
 So you can keep, say, Layers on the left, Styles on the right and the component Settings at the bottom — all visible at once.
 
 - Drag a tab by its icon. While dragging, empty zones show a "Drop here" strip, and a blue indicator shows where the tab will land:
   - on a **tab bar** — the tab joins that group at that position;
   - on the **upper / lower third** of a side group — the zone is split and the tab gets a group of its own above / below;
+  - on the **left / right third** of a bottom group — a new group to the left / right of it;
   - anywhere else in a group — the tab joins that group.
 - A group that loses its last tab disappears; a zone without groups collapses and gives its room back to the canvas.
-- Drag the inner edge of a zone to resize it (double-click: default size); drag the bar between two groups to change their heights (double-click: 50/50). The canvas never gets narrower than 320 px.
+- Drag the inner edge of a zone to resize it (double-click: default size); drag the bar between two groups to change their heights (double-click: 50/50) or, at the bottom, their widths (double-click: equal widths). Sizes are remembered. The canvas never gets narrower than 320 px.
 - `Esc` cancels a drag. Tabs work with the keyboard too (`Enter`, `←` / `→`).
 - Every zone has a **collapse** button (the chevron at the outer end of its tab bar): a collapsed zone shrinks to a rail with the tab icons — click an icon (or drop a tab on the rail) to expand it again.
 - The layout (tabs, groups, sizes) and the open Style Manager sectors are remembered in `localStorage`.
@@ -127,7 +128,7 @@ grapesjs.init({
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `defaultLayout` | `{}` | Initial placement: groups of tab ids per zone, e.g. `{ left: [['open-layers'], ['open-blocks']], bottom: [['open-tm']] }`. A tab id is the command of its button (`open-sm`, `open-tm`, `open-layers`, `open-blocks`, ...). Tabs not listed go to the right zone. Used until the user changes the layout (or after `sidebar-tools:reset-layout`). |
+| `defaultLayout` | `{}` | Initial placement: groups of tab ids per zone, e.g. `{ left: [['open-layers'], ['open-blocks']], bottom: [['open-tm'], ['open-sm']] }` (bottom: up to three groups side by side). A tab id is the command of its button (`open-sm`, `open-tm`, `open-layers`, `open-blocks`, ...). Tabs not listed go to the right zone. Used until the user changes the layout (or after `sidebar-tools:reset-layout`). |
 | `sizes` | `{ left: 260, right: null, bottom: 240 }` | Default zone sizes in px. `right: null` = 15% of the editor width, like the GrapesJS sidebar. |
 | `minSize` | `{ side: 180, bottom: 120 }` | Minimum width of the side zones / height of the bottom zone. |
 | `minRatio` / `maxRatio` | `0.15` / `0.85` | Bounds of the upper group height in a split zone. |

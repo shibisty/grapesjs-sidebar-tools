@@ -6,15 +6,22 @@
 import type { DefaultLayout, DockLayout, GroupState, ZoneId, ZoneState } from './types';
 import { ZONES } from './types';
 
-/** Left/right can be split in two by height, bottom holds one group. */
-export const MAX_GROUPS: Record<ZoneId, number> = { left: 2, right: 2, bottom: 1 };
+/** Left/right can be split in two by height, bottom into up to three groups side by side. */
+export const MAX_GROUPS: Record<ZoneId, number> = { left: 2, right: 2, bottom: 3 };
+
+/** A bottom group is never narrower than this (px): a split that would make it so is not offered. */
+export const MIN_BOTTOM_GROUP = 360;
 
 /** Where a dragged tab can be dropped. */
 export type DropTarget =
   /** Into the tab bar of an existing group, before the tab at `index`. */
   | { kind: 'tabs'; zone: ZoneId; group: number; index: number }
-  /** A new group in a side zone, above (`before`) or below (`after`) the existing one. */
-  | { kind: 'split'; zone: ZoneId; position: 'before' | 'after' }
+  /**
+   * A new group: in a side zone above (`before`) or below (`after`) the existing one;
+   * in the bottom zone left (`before`) or right (`after`) of group `group`
+   * (without `group`: at the start / the end).
+   */
+  | { kind: 'split'; zone: ZoneId; position: 'before' | 'after'; group?: number }
   /** An empty zone: a new group. */
   | { kind: 'zone'; zone: ZoneId };
 
@@ -35,6 +42,7 @@ export function cloneLayout(layout: DockLayout): DockLayout {
       ratio: z.ratio,
       groups: z.groups.map((g) => ({ tabs: g.tabs.slice(), active: g.active })),
       collapsed: !!z.collapsed,
+      ...(z.widths ? { widths: z.widths.slice() } : {}),
     };
   });
   return out;
@@ -125,6 +133,12 @@ export function normalizeLayout(
     home.tabs.push(...missing);
   }
 
+  ZONES.forEach((zone) => {
+    const w = src[zone] && typeof src[zone] === 'object' ? src[zone].widths : undefined;
+    const fixed = fixWidths(w, layout[zone].groups.length);
+    if (fixed) layout[zone].widths = fixed;
+  });
+
   const preferred = opts.preferredActive || [];
   ZONES.forEach((zone) =>
     layout[zone].groups.forEach((g) => {
@@ -133,6 +147,36 @@ export function normalizeLayout(
     }),
   );
   return layout;
+}
+
+/**
+ * Valid shares for `count` groups side by side: positive, summing to 1.
+ * Anything else (wrong length, junk) — undefined, i.e. equal shares.
+ */
+export function fixWidths(raw: unknown, count: number): number[] | undefined {
+  if (count < 2 || !Array.isArray(raw) || raw.length !== count) return undefined;
+  const nums = raw.map(Number);
+  if (nums.some((n) => !isFinite(n) || n <= 0)) return undefined;
+  const sum = nums.reduce((a, b) => a + b, 0);
+  return nums.map((n) => n / sum);
+}
+
+/** Shares of the groups of a zone (equal when none are stored). */
+export function zoneWidths(zone: ZoneState): number[] {
+  const n = zone.groups.length;
+  return fixWidths(zone.widths, n) || Array.from({ length: n }, () => 1 / Math.max(n, 1));
+}
+
+/** Stores the shares of the bottom groups (normalized; equal shares are dropped). */
+export function setZoneWidths(layout: DockLayout, zone: ZoneId, widths: number[] | null): DockLayout {
+  const fixed = widths ? fixWidths(widths, layout[zone].groups.length) : undefined;
+  const cur = layout[zone].widths;
+  if (!fixed && !cur) return layout;
+  if (fixed && cur && fixed.length === cur.length && fixed.every((w, i) => Math.abs(w - cur[i]) < 1e-6)) return layout;
+  const next = cloneLayout(layout);
+  if (fixed) next[zone].widths = fixed;
+  else delete next[zone].widths;
+  return next;
 }
 
 /** A layout from the `defaultLayout` option (zone -> groups of tab ids). */
@@ -165,6 +209,10 @@ export function moveTab(layout: DockLayout, tabId: string, target: DropTarget): 
 
   // Reference to the destination group, taken before the removal shifts indices.
   const destGroup: GroupState | null = target.kind === 'tabs' ? next[target.zone].groups[target.group] || null : null;
+  // A split next to a given group: remember that group, not its index.
+  const splitRef: GroupState | null =
+    target.kind === 'split' && typeof target.group === 'number' ? next[target.zone].groups[target.group] || null : null;
+  const countsBefore = ZONES.map((z) => next[z].groups.length);
   if (target.kind === 'tabs' && !destGroup) return layout;
   if (target.kind === 'split' && MAX_GROUPS[target.zone] < 2) return layout;
 
@@ -209,12 +257,19 @@ export function moveTab(layout: DockLayout, tabId: string, target: DropTarget): 
       const last = zone.groups[zone.groups.length - 1];
       last.tabs.push(tabId);
       last.active = tabId;
+    } else if (splitRef && zone.groups.includes(splitRef)) {
+      const at = zone.groups.indexOf(splitRef) + (target.kind === 'split' && target.position === 'after' ? 1 : 0);
+      zone.groups.splice(at, 0, group);
     } else if (target.kind === 'split' && target.position === 'before') {
       zone.groups.unshift(group);
     } else {
       zone.groups.push(group);
     }
   }
+  // Groups came or went: their stored shares no longer fit, back to equal shares.
+  ZONES.forEach((z, i) => {
+    if (next[z].groups.length !== countsBefore[i]) delete next[z].widths;
+  });
   return next;
 }
 
@@ -283,6 +338,7 @@ export function removeTabs(layout: DockLayout, tabIds: readonly string[]): DockL
         return g;
       })
       .filter((g) => g.tabs.length);
+    if (next[zone].widths && next[zone].widths!.length !== next[zone].groups.length) delete next[zone].widths;
   });
   return next;
 }

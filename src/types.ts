@@ -28,8 +28,13 @@ export interface ZoneState {
   size: number | null;
   /** Height of the first group as a fraction of the zone, when the zone is split in two. */
   ratio: number;
-  /** 0–2 groups for left/right (top and bottom half), 0–1 for bottom. */
+  /** 0–2 groups for left/right (top and bottom half), 0–3 side by side for bottom. */
   groups: GroupState[];
+  /**
+   * Bottom zone split into groups side by side: the share of every group
+   * (fractions, one per group, summing to 1). Missing — equal shares.
+   */
+  widths?: number[];
   /** Collapsed to a narrow rail with the tab icons. */
   collapsed?: boolean;
 }

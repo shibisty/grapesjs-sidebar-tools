@@ -55,9 +55,33 @@ describe('hitTest', () => {
     expect(hitTest(1100, 790, groups, [])!.target).toEqual({ kind: 'tabs', zone: 'right', group: 1, index: 3 });
   });
 
-  it('the bottom zone never splits', () => {
-    const g: GroupBoxes = { ...rightGroup(), zone: 'bottom' };
-    expect(hitTest(1100, 700, [g], [])!.target).toEqual({ kind: 'tabs', zone: 'bottom', group: 0, index: 3 });
+  /** A bottom group at x=0..1200 (tab bar 600..640, body 640..900). */
+  function bottomGroup(groupCount = 1, group = 0, left = 0, width = 1200, zoneWidth = 1200): GroupBoxes {
+    return {
+      zone: 'bottom',
+      group,
+      groupCount,
+      zoneWidth,
+      tabBar: box(left, 600, width, 40),
+      tabs: [box(left + 5, 605, 30, 30)],
+      body: box(left, 640, width, 260),
+    };
+  }
+
+  it('bottom: the left / right third of a group puts a new group beside it', () => {
+    expect(hitTest(100, 700, [bottomGroup()], [])!.target).toEqual({ kind: 'split', zone: 'bottom', position: 'before', group: 0 });
+    const right = hitTest(1100, 700, [bottomGroup()], [])!;
+    expect(right.target).toEqual({ kind: 'split', zone: 'bottom', position: 'after', group: 0 });
+    expect(right.indicator).toEqual({ left: 600, top: 600, width: 600, height: 300 });
+    expect(hitTest(600, 700, [bottomGroup()], [])!.target).toEqual({ kind: 'tabs', zone: 'bottom', group: 0, index: 1 });
+    // RTL: the right third is "before"
+    expect(hitTest(1100, 700, [bottomGroup()], [], true)!.target).toMatchObject({ position: 'before' });
+  });
+
+  it('bottom: no split when the zone is too narrow for one more group, or already has three', () => {
+    expect(hitTest(1100, 700, [bottomGroup(2, 1, 600, 600, 1000)], [])!.target.kind).toBe('tabs');
+    expect(hitTest(3700, 700, [bottomGroup(2, 1, 1920, 1920, 3840)], [])!.target.kind).toBe('split');
+    expect(hitTest(3700, 700, [bottomGroup(3, 2, 2560, 1280, 3840)], [])!.target.kind).toBe('tabs');
   });
 
   it('empty zone strips', () => {

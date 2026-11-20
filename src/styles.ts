@@ -110,6 +110,10 @@ export const CSS = [
   // Groups (a side zone split in two: first group takes --gjs-st-ratio)
   '.gjs-st-group{display:flex;flex-direction:column;flex:1 1 0;min-height:0;min-width:0;}',
   '.gjs-st-zone--split>.gjs-st-group--first{flex:0 0 var(--gjs-st-ratio,50%);}',
+  // The bottom zone split: groups side by side, their shares set inline (flex-grow)
+  '.gjs-st-zone--bottom.gjs-st-zone--split{flex-direction:row;}',
+  '.gjs-st-zone--bottom .gjs-st-group{flex:1 1 0px;}',
+  '.gjs-st-zone--bottom .gjs-st-split{cursor:col-resize;}',
   '.gjs-st-tabs{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:2px;flex:0 0 auto;box-sizing:border-box;min-height:40px;padding:5px;border-bottom:2px solid var(--gjs-main-dark-color,rgba(0,0,0,.2));text-align:center;}',
   '.gjs-st-zone--left .gjs-st-tabs{justify-content:flex-start;}',
   '.gjs-st-zone--bottom .gjs-st-tabs{justify-content:flex-start;}',

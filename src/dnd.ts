@@ -4,7 +4,7 @@
  * pointer move.
  */
 import type { DropTarget } from './layout';
-import { MAX_GROUPS } from './layout';
+import { MAX_GROUPS, MIN_BOTTOM_GROUP } from './layout';
 import type { ZoneId } from './types';
 
 export interface Box {
@@ -20,6 +20,8 @@ export interface GroupBoxes {
   /** Number of groups currently in the zone. */
   groupCount: number;
   tabBar: Box;
+  /** Width of the whole zone (bottom: room for one more group?). */
+  zoneWidth?: number;
   /** Boxes of the tabs in the bar, in order. */
   tabs: Box[];
   body: Box;
@@ -81,6 +83,31 @@ export function hitTest(
   for (const g of groups) {
     if (!contains(g.body, x, y)) continue;
     const canSplit = MAX_GROUPS[g.zone] > 1 && g.groupCount < MAX_GROUPS[g.zone];
+    if (g.zone === 'bottom') {
+      // Side by side: the left / right third of a group puts a new group there,
+      // when the zone is wide enough for one more (several on a 4K screen).
+      const roomy = !g.zoneWidth || g.zoneWidth / (g.groupCount + 1) >= MIN_BOTTOM_GROUP;
+      if (canSplit && roomy && g.body.width > 0) {
+        const rel = (x - g.body.left) / g.body.width;
+        const halfW = g.body.width / 2;
+        const top = g.tabBar.top;
+        const height = g.tabBar.height + g.body.height;
+        const leftSide = rtl ? rel > 1 - SPLIT_EDGE : rel < SPLIT_EDGE;
+        const rightSide = rtl ? rel < SPLIT_EDGE : rel > 1 - SPLIT_EDGE;
+        if (leftSide || rightSide) {
+          const before = leftSide;
+          const atLeft = rel < 0.5;
+          return {
+            target: { kind: 'split', zone: g.zone, position: before ? 'before' : 'after', group: g.group },
+            indicator: { left: atLeft ? g.body.left : g.body.left + halfW, top, width: halfW, height },
+          };
+        }
+      }
+      return {
+        target: { kind: 'tabs', zone: g.zone, group: g.group, index: g.tabs.length },
+        indicator: { ...g.body },
+      };
+    }
     if (canSplit && g.body.height > 0) {
       const rel = (y - g.body.top) / g.body.height;
       const half = g.body.height / 2;

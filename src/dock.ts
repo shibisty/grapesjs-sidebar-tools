@@ -1,7 +1,8 @@
 /**
  * The dock UI: three zones around the canvas (left, right, bottom), each
  * with tab groups. Left/right hold up to two groups one above the other
- * (with a resizer between them), bottom holds one. Tabs are dragged
+ * (with a resizer between them), bottom up to three side by side (as many
+ * as fit at MIN_BOTTOM_GROUP px each). Tabs are dragged
  * between groups and zones with the pointer; zones are resized by their
  * inner edge.
  *
@@ -19,6 +20,9 @@ import {
   setZoneCollapsed,
   setZoneRatio,
   setZoneSize,
+  setZoneWidths,
+  zoneWidths,
+  MIN_BOTTOM_GROUP,
   type DropTarget,
 } from './layout';
 import type { DockLayout, SidebarToolsLabels, ZoneId } from './types';
@@ -85,7 +89,7 @@ export interface DockOptions {
    * Called after every change made by the user (or through the API).
    * `live` is true while a resizer is being dragged (don't persist yet).
    */
-  onChange(layout: DockLayout, info: { reason: 'move' | 'activate' | 'size' | 'ratio' | 'set' | 'collapse'; live?: boolean }): void;
+  onChange(layout: DockLayout, info: { reason: 'move' | 'activate' | 'size' | 'ratio' | 'widths' | 'set' | 'collapse'; live?: boolean }): void;
 }
 
 export interface Dock {
@@ -205,6 +209,13 @@ export function createDock(opts: DockOptions): Dock {
       zoneEls[zone].classList.toggle(CLS.zoneCollapsed, !!layout[zone].collapsed && !!layout[zone].groups.length);
       const ratio = clamp(layout[zone].ratio, opts.minRatio, opts.maxRatio);
       zoneEls[zone].style.setProperty('--gjs-st-ratio', `${ratio * 100}%`);
+      if (zone === 'bottom') {
+        // Groups side by side: each grows by its share.
+        const widths = zoneWidths(layout.bottom);
+        zoneEls.bottom.querySelectorAll<HTMLElement>(`:scope > .${CLS.group}`).forEach((g, i) => {
+          g.style.flex = `${widths[i] ?? 1} 1 0px`;
+        });
+      }
     });
   }
 
@@ -279,10 +290,15 @@ export function createDock(opts: DockOptions): Dock {
         if (gi > 0) {
           const split = el('div', CLS.split);
           split.setAttribute('role', 'separator');
-          split.setAttribute('aria-orientation', 'horizontal');
+          split.setAttribute('aria-orientation', zone === 'bottom' ? 'vertical' : 'horizontal');
           split.title = labels.resizerTitle;
-          split.addEventListener('pointerdown', (e) => startSplitResize(e, zone, split));
-          split.addEventListener('dblclick', () => commit(setZoneRatio(layout, zone, 0.5), 'ratio'));
+          if (zone === 'bottom') {
+            split.addEventListener('pointerdown', (e) => startWidthResize(e, gi, split));
+            split.addEventListener('dblclick', () => commit(setZoneWidths(layout, zone, null), 'widths'));
+          } else {
+            split.addEventListener('pointerdown', (e) => startSplitResize(e, zone, split));
+            split.addEventListener('dblclick', () => commit(setZoneRatio(layout, zone, 0.5), 'ratio'));
+          }
           z.appendChild(split);
         }
         const group = el('div', `${CLS.group} ${CLS.group}--${gi === 0 ? 'first' : 'second'}`);
@@ -321,11 +337,11 @@ export function createDock(opts: DockOptions): Dock {
     applySizes();
   }
 
-  function commit(next: DockLayout, reason: 'move' | 'activate' | 'size' | 'ratio' | 'set' | 'collapse', live = false) {
+  function commit(next: DockLayout, reason: 'move' | 'activate' | 'size' | 'ratio' | 'widths' | 'set' | 'collapse', live = false) {
     if (destroyed) return;
     if (next === layout && !live) return;
     layout = next;
-    if (reason === 'size' || reason === 'ratio') applySizes();
+    if (reason === 'size' || reason === 'ratio' || reason === 'widths') applySizes();
     else render();
     opts.onChange(layout, { reason, live });
   }
@@ -371,6 +387,7 @@ export function createDock(opts: DockOptions): Dock {
           zone,
           group: gi,
           groupCount: groupEls.length,
+          zoneWidth: z.getBoundingClientRect().width,
           tabBar: box(bar),
           tabs: Array.from(bar.querySelectorAll(`.${CLS.tab}`)).map(box),
           body: box(body),
@@ -604,6 +621,39 @@ export function createDock(opts: DockOptions): Dock {
         opts.onChange(layout, { reason: 'ratio', live: true });
       },
       () => opts.onChange(layout, { reason: 'ratio' }),
+    );
+  }
+
+  /** The resizer between bottom groups `gi - 1` and `gi`: moves their border, the others keep their size. */
+  function startWidthResize(e: PointerEvent, gi: number, handle: HTMLElement) {
+    const z = zoneEls.bottom;
+    const groupEls = Array.from(z.querySelectorAll<HTMLElement>(`:scope > .${CLS.group}`));
+    const a = groupEls[gi - 1];
+    const b = groupEls[gi];
+    if (!a || !b) return;
+    const start = zoneWidths(layout.bottom);
+    const ra = a.getBoundingClientRect();
+    const rb = b.getBoundingClientRect();
+    const pair = ra.width + rb.width;
+    const share = start[gi - 1] + start[gi];
+    const rtl = opts.isRtl?.() ?? false;
+    trackPointer(
+      e,
+      handle,
+      (ev) => {
+        if (!pair) return;
+        // Width of the first of the two (in DOM order), in px.
+        let wa = rtl ? ra.right - ev.clientX : ev.clientX - ra.left;
+        const min = Math.min(MIN_BOTTOM_GROUP / 2, pair / 2);
+        wa = clamp(wa, min, pair - min);
+        const widths = start.slice();
+        widths[gi - 1] = (share * wa) / pair;
+        widths[gi] = share - widths[gi - 1];
+        layout = setZoneWidths(layout, 'bottom', widths);
+        applySizes();
+        opts.onChange(layout, { reason: 'widths', live: true });
+      },
+      () => opts.onChange(layout, { reason: 'widths' }),
     );
   }
 
